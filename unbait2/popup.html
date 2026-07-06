@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Unbait2 Settings</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    body {
+      width: 350px;
+      padding: 15px;
+    }
+    .container {
+      padding: 0;
+      box-shadow: none;
+    }
+    h1 {
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Unbait2 Settings 🎣</h1>
+    
+    <div class="form-group">
+      <label for="apiKey">OpenRouter API Key:</label>
+      <input type="password" id="apiKey" placeholder="sk-or-...">
+    </div>
+
+    <div class="form-group">
+      <label for="model">AI Model:</label>
+      <select id="model">
+        <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash</option>
+        <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+        <option value="meta-llama/llama-3.2-3b-instruct:free">Llama 3.2 3B (Free)</option>
+      </select>
+    </div>
+
+    <button id="save">Save Settings</button>
+    <button id="test" class="secondary" style="margin-top: 10px; width: 100%;">Test Connection</button>
+    
+    <div id="status"></div>
+    
+    <div style="margin-top: 20px; font-size: 12px; text-align: center;">
+      <a href="onboarding.html" target="_blank">Open Setup Guide</a>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

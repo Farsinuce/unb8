@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to Unbait2</title>
+  <link rel="stylesheet" href="common.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Welcome to Unbait2! 🎣🚫</h1>
+    <p>You're one step away from a clickbait-free browsing experience.</p>
+    
+    <div class="step active">
+      <h3>Step 1: Get an API Key</h3>
+      <p>Unbait2 uses AI to rewrite headlines. To keep it free and private, you use your own API key.</p>
+      <p>We recommend <strong>OpenRouter</strong> because it's cheap and gives you access to Google's Gemini models (often free!).</p>
+      <a href="https://openrouter.ai/keys" target="_blank" class="button">Get OpenRouter Key ↗</a>
+    </div>
+
+    <div class="step">
+      <h3>Step 2: Enter Your Key</h3>
+      <div class="form-group">
+        <label for="apiKey">Paste your API Key here:</label>
+        <input type="password" id="apiKey" placeholder="sk-or-...">
+      </div>
+      
+      <div class="form-group">
+        <label for="model">Select AI Model:</label>
+        <select id="model">
+          <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash (Recommended - Fast & Cheap)</option>
+          <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
+          <option value="meta-llama/llama-3.2-3b-instruct:free">Llama 3.2 3B (Free)</option>
+        </select>
+        <p class="help-text">Gemini Flash is extremely cheap (pennies for thousands of headlines).</p>
+      </div>
+
+      <button id="saveAndTest">Save & Test Connection</button>
+      <div id="status"></div>
+    </div>
+
+    <div class="step">
+      <h3>Step 3: Enjoy!</h3>
+      <p>Once connected, just visit <strong>dr.dk</strong>, <strong>bt.dk</strong>, or <strong>ekstrabladet.dk</strong>.</p>
+      <p>Look for the 💡 icon to toggle between the original and the AI-generated headline.</p>
+    </div>
+  </div>
+  <script src="onboarding.js"></script>
+</body>
+</html>

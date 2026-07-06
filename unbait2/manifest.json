@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Unbait2",
+  "version": "1.0.0",
+  "description": "Replaces clickbait headlines with factual ones using AI.",
+  "permissions": [
+    "storage",
+    "offscreen"
+  ],
+  "host_permissions": [
+    "https://*.ekstrabladet.dk/*",
+    "https://*.bt.dk/*",
+    "https://*.dr.dk/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Unbait2 Settings"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*.ekstrabladet.dk/*",
+        "https://*.bt.dk/*",
+        "https://*.dr.dk/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
