@@ -3,18 +3,18 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Welcome to Unbait2</title>
+  <title>Welcome to unb8</title>
   <link rel="stylesheet" href="common.css">
 </head>
 <body>
   <div class="container">
-    <h1>Welcome to Unbait2! 🎣🚫</h1>
+    <h1>Welcome to unb8! 🎣</h1>
     <p>You're one step away from a clickbait-free browsing experience.</p>
-    
+
     <div class="step active">
       <h3>Step 1: Get an API Key</h3>
-      <p>Unbait2 uses AI to rewrite headlines. To keep it free and private, you use your own API key.</p>
-      <p>We recommend <strong>OpenRouter</strong> because it's cheap and gives you access to Google's Gemini models (often free!).</p>
+      <p>unb8 uses AI to rewrite headlines. To keep it free and private, you use your own API key.</p>
+      <p>We recommend <strong>OpenRouter</strong> because it gives you access to several completely free models (Gemma, Nemotron, GPT-OSS) with one key.</p>
       <a href="https://openrouter.ai/keys" target="_blank" class="button">Get OpenRouter Key ↗</a>
     </div>
 
@@ -28,11 +28,15 @@
       <div class="form-group">
         <label for="model">Select AI Model:</label>
         <select id="model">
-          <option value="google/gemini-2.5-flash">Google Gemini 2.5 Flash (Recommended - Fast & Cheap)</option>
-          <option value="openai/gpt-4o-mini">OpenAI GPT-4o Mini</option>
-          <option value="meta-llama/llama-3.2-3b-instruct:free">Llama 3.2 3B (Free)</option>
+          <option value="auto">Auto — free models with fallback (Recommended)</option>
+          <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free)</option>
+          <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B A4B (free)</option>
+          <option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra 550B (free)</option>
+          <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (free)</option>
+          <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
+          <option value="~google/gemini-flash-latest">Gemini Flash (latest, paid)</option>
         </select>
-        <p class="help-text">Gemini Flash is extremely cheap (pennies for thousands of headlines).</p>
+        <p class="help-text">"Auto" uses free models and costs nothing — if one is rate-limited, the next one is tried automatically.</p>
       </div>
 
       <button id="saveAndTest">Save & Test Connection</button>
@@ -42,7 +46,7 @@
     <div class="step">
       <h3>Step 3: Enjoy!</h3>
       <p>Once connected, just visit <strong>dr.dk</strong>, <strong>bt.dk</strong>, or <strong>ekstrabladet.dk</strong>.</p>
-      <p>Look for the 💡 icon to toggle between the original and the AI-generated headline.</p>
+      <p>Look for the 🎣 icon to toggle between the original and the AI-generated headline.</p>
     </div>
   </div>
   <script src="onboarding.js"></script>

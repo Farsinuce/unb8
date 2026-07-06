@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>unb8 Settings</title>
+  <link rel="stylesheet" href="common.css">
+  <style>
+    body {
+      width: 350px;
+      padding: 15px;
+    }
+    .container {
+      padding: 0;
+      box-shadow: none;
+    }
+    h1 {
+      font-size: 18px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>unb8 Settings 🎣</h1>
+
+    <div class="toggle-row">
+      <div class="toggle-text">
+        <span class="toggle-title">Enable unb8</span>
+        <span class="toggle-desc">Rewrite clickbait headlines on supported sites</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="extensionEnabled">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="toggle-row">
+      <div class="toggle-text">
+        <span class="toggle-title">Unbait article pages</span>
+        <span class="toggle-desc">Also rewrite full article text (and inline "Kort nyt" bodies), removing filler — uses more tokens</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="rewriteArticles">
+        <span class="slider"></span>
+      </label>
+    </div>
+
+    <div class="form-group">
+      <label for="apiKey">OpenRouter API Key:</label>
+      <input type="password" id="apiKey" placeholder="sk-or-...">
+    </div>
+
+    <div class="form-group">
+      <label for="model">AI Model:</label>
+      <select id="model">
+        <option value="auto">Auto — free models with fallback (recommended)</option>
+        <optgroup label="Free models">
+          <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free)</option>
+          <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B A4B (free)</option>
+          <option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra 550B (free)</option>
+          <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (free)</option>
+          <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
+        </optgroup>
+        <optgroup label="Paid models">
+          <option value="~google/gemini-flash-latest">Gemini Flash (latest, paid)</option>
+        </optgroup>
+      </select>
+      <p class="help-text">If the chosen model fails (rate limit, downtime), unb8 automatically falls back to the free models.</p>
+    </div>
+
+    <button id="save">Save Settings</button>
+    <button id="test" class="secondary" style="margin-top: 10px; width: 100%;">Test Connection</button>
+    <button id="clearCache" class="secondary" style="margin-top: 10px; width: 100%;">Clear Cached Headlines</button>
+
+    <div id="status"></div>
+
+    <div style="margin-top: 20px; font-size: 12px; text-align: center;">
+      <a href="onboarding.html" target="_blank">Open Setup Guide</a>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

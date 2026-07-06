@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Unbait2",
-  "version": "1.0.0",
+  "name": "unb8",
+  "version": "1.2.0",
   "description": "Replaces clickbait headlines with factual ones using AI.",
   "permissions": [
     "storage",
@@ -17,7 +17,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Unbait2 Settings"
+    "default_title": "unb8 Settings"
   },
   "content_scripts": [
     {
