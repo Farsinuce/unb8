@@ -13,7 +13,8 @@
 *   **On/off toggles:** The popup has switches to disable the whole extension or enable **article-page rewriting**, which condenses the full article text and removes filler — including the inline "Kort nyt" short-news items on dr.dk (off by default).
 *   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
-*   **Smart Caching:** Saves generated titles for 7 days to minimize API usage.
+*   **Local Caching:** Saves generated titles for 7 days to minimize API usage.
+
 
 ## Installation (Developer Mode)
 
@@ -30,6 +31,18 @@ Since this extension is not yet in the Chrome Web Store, you can install it manu
 2.  Follow the instructions to get a free API Key from **OpenRouter** (the default "Auto" model setting only uses free models, so no credits are needed).
 3.  Paste your key and click **Save & Test**.
 4.  Visit any supported news site and enjoy a cleaner news feed!
+
+## Legal
+
+unb8 only changes what *you* see in *your own* browser, and never changes anything anyone else sees.
+
+Danish copyright law ([Ophavsretsloven § 2](https://danskelove.dk/ophavsretsloven/2)) reserves two things to the author: making copies of a work, and **making it available *to the public*** (*tilgængeliggørelse for almenheden*). unb8 does neither in any way the law restricts:
+
+*   **Nothing is published or shared.** The rewritten headline is painted only into your own browser tab, for your eyes only. It is never redistributed, hosted, or shown to another reader — and a click on the 🎣 restores the original instantly. The publisher's servers are unaffected and keep serving the original headline to everyone else. Because there is no *public*, the "making available to the public" right is never triggered at all.
+*   **The copies involved are private and permitted.** The copies your browser makes just to *display* a page you're allowed to read are exempt "transient copies": the EU Court of Justice held in *PRCA v NLA* ([C‑360/13](https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=CELEX:62013CJ0360), 2014) that merely viewing a web page is not copyright infringement and needs no permission. unb8 only ever reads pages that are freely served to your browser, and the private, non‑commercial, single‑user copy used to generate a cleaner headline falls under the private‑copying right ([Ophavsretsloven § 12](https://danskelove.dk/ophavsretsloven/12)).
+*   **It's a tool, not a service.** unb8 is **not** published to the Chrome Web Store (or any store), runs entirely on your own machine, has no central server, and uses *your own* OpenRouter API key. There is no operator collecting, transforming, or re‑publishing anyone's content — so there is no "many" for the content to reach.
+
+This puts unb8 in the same everyday category as **reader mode, dark‑mode and accessibility extensions, ad blockers, and in‑browser translation** (Google Translate literally rewrites the visible text of a copyrighted page) — all of which reformat someone else's page inside your own browser and are universally treated as lawful. Functionally, unb8 is a pair of reading glasses for clickbait.
 
 ## Development
 
