@@ -1,6 +1,8 @@
 // unb8 service worker: caching, article fetching, OpenRouter calls with free-model fallback.
 
-// Free models on OpenRouter, tried in order. Verified against /api/v1/models (July 2026).
+// Curated free models, in preferred order (hand-picked for Danish quality, verified
+// against /api/v1/models July 2026). Used as the head of the auto chain and as the
+// fallback whenever live discovery (getFreeModelChain) is unavailable.
 const FREE_MODEL_CHAIN = [
   'google/gemma-4-31b-it:free',
   'google/gemma-4-26b-a4b-it:free',
@@ -8,6 +10,11 @@ const FREE_MODEL_CHAIN = [
   'openai/gpt-oss-120b:free',
   'openai/gpt-oss-20b:free'
 ];
+
+// OpenRouter rotates its free models, so once a day we fetch the live catalogue and
+// rebuild the auto chain (see getFreeModelChain) so it never goes stale.
+const FREE_MODELS_CACHE_KEY = 'unbait_free_models_v1';
+const FREE_MODELS_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
 
 const CACHE_PREFIX_TITLE = 'unbait_cache_v2_';
 const CACHE_PREFIX_REWRITE = 'unbait_rewrite_v1_';
@@ -320,6 +327,71 @@ async function fetchWithTimeout(url, timeoutMs, options = {}) {
   }
 }
 
+// ---- Live free-model discovery ---------------------------------------------
+// OpenRouter rotates its free models, so a hard-coded chain goes stale. Once a day
+// we pull the live catalogue (GET /api/v1/models — public, CORS-open, no key or host
+// permission needed) and rebuild the auto chain: curated models that are still
+// offered (kept first, for Danish quality), then other currently-free TEXT models by
+// descending context length. Cached in storage; any failure falls back to the curated
+// list so a bad network never blocks title generation.
+let freeChainPromise = null;
+
+async function getFreeModelChain() {
+  try {
+    const cached = (await chrome.storage.local.get(FREE_MODELS_CACHE_KEY))[FREE_MODELS_CACHE_KEY];
+    if (cached && cached.ts && (Date.now() - cached.ts) < FREE_MODELS_TTL_MS &&
+        Array.isArray(cached.models) && cached.models.length) {
+      return cached.models;
+    }
+  } catch (e) { /* fall through to a live refresh */ }
+  // A news page fires many teasers at once — share one in-flight refresh between them.
+  if (!freeChainPromise) {
+    freeChainPromise = refreshFreeModelChain().finally(() => { freeChainPromise = null; });
+  }
+  return freeChainPromise;
+}
+
+async function refreshFreeModelChain() {
+  try {
+    const live = await fetchFreeModels();                         // [{ id, context_length }, ...]
+    const liveIds = new Set(live.map(m => m.id));
+    const curated = FREE_MODEL_CHAIN.filter(id => liveIds.has(id));
+    const extras = live
+      .filter(m => !FREE_MODEL_CHAIN.includes(m.id))
+      .filter(m => !/coder/i.test(m.id))                          // skip code-specialist models (poor Danish prose)
+      .sort((a, b) => (b.context_length || 0) - (a.context_length || 0))
+      .slice(0, 6)
+      .map(m => m.id);
+    const chain = [...curated, ...extras];
+    const finalChain = chain.length ? chain : FREE_MODEL_CHAIN;
+    await setCached(FREE_MODELS_CACHE_KEY, { ts: Date.now(), models: finalChain });
+    console.log(`unb8: free-model chain refreshed (${finalChain.length}) — ${finalChain.join(', ')}`);
+    return finalChain;
+  } catch (e) {
+    console.warn('unb8: free-model discovery failed, using curated list —', e.message);
+    return FREE_MODEL_CHAIN;
+  }
+}
+
+// Fetch OpenRouter's catalogue and keep the genuinely-free text models. Free means
+// both prompt and completion cost "0"; text means it can emit text (skip image/audio).
+async function fetchFreeModels() {
+  const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', 15000);
+  if (!res.ok) throw new Error(`models list HTTP ${res.status}`);
+  const list = JSON.parse(res.body).data;
+  if (!Array.isArray(list)) throw new Error('unexpected /models payload');
+  return list.filter(m => {
+    if (typeof m.id !== 'string' || !m.id.endsWith(':free')) return false;
+    const p = m.pricing || {};
+    if (String(p.prompt) !== '0' || String(p.completion) !== '0') return false;
+    const arch = m.architecture || {};
+    const out = arch.output_modalities ||
+      (typeof arch.modality === 'string' ? [arch.modality.split('->').pop()] : null);
+    if (out && !out.some(x => String(x).includes('text'))) return false;
+    return true;
+  });
+}
+
 // Try the selected model first (or the whole free chain when set to 'auto'),
 // falling back through the remaining free models on retryable failures.
 async function callOpenRouterWithFallback(prompt, { maxTokensFree, maxTokensPaid }) {
@@ -330,9 +402,12 @@ async function callOpenRouterWithFallback(prompt, { maxTokensFree, maxTokensPaid
   }
 
   const selected = settings.selectedModel || 'auto';
+  // Live-discovered free chain (curated head + current extras), falling back to the
+  // static curated list if discovery is unavailable.
+  const freeChain = await getFreeModelChain();
   const chain = (selected === 'auto')
-    ? FREE_MODEL_CHAIN
-    : [selected, ...FREE_MODEL_CHAIN.filter(m => m !== selected)];
+    ? freeChain
+    : [selected, ...freeChain.filter(m => m !== selected)];
 
   let lastError = 'No models attempted';
   for (const model of chain) {
