@@ -16,5 +16,9 @@ web-ext-artifacts/
 # web-ext signing state (local tooling cache, not part of the extension)
 .amo-upload-uuid
 
+# Local signing helper + AMO API credentials — NEVER commit these
+sign.local.ps1
+.amo-credentials
+
 # Editor / workspace files
 unbait2.code-workspace
