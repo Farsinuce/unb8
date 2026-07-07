@@ -16,14 +16,25 @@
 *   **Local Caching:** Saves generated titles for 7 days to minimize API usage.
 
 
-## Installation (Developer Mode)
+## Installation
+
+### Chrome / Edge / Brave / Vivaldi
 
 Since this extension is not yet in the Chrome Web Store, you can install it manually:
 
 1.  **Download & unzip:** [Download the ZIP](https://github.com/Farsinuce/unb8/archive/refs/heads/main.zip) and extract it. The extension itself is the `unb8` subfolder inside.
-2.  **Open Extensions:** In a Chromium browser (Chrome/Edge/Brave/Vivaldi), go to `chrome://extensions/`.
-3.  **Enable Developer Mode:** Toggle the switch in the top-right corner.
-4.  **Load Unpacked:** Click **"Load unpacked"** and select the `unb8` folder from the unzipped download.
+2.  **Open Extensions:** go to `chrome://extensions/`.
+3.  **Enable Developer Mode:** toggle the switch in the top-right corner.
+4.  **Load Unpacked:** click **"Load unpacked"** and select the `unb8` folder from the unzipped download.
+
+### Firefox
+
+Firefox requires add-ons to be Mozilla-signed, so install the signed package rather than an unpacked folder:
+
+1.  **Download** the latest `unb8-*.xpi` from the [Releases page](https://github.com/Farsinuce/unb8/releases).
+2.  **Install it:** open `about:addons` → the gear ⚙ → **Install Add-on From File…**, pick the `.xpi`, and confirm (or simply drag the `.xpi` onto a Firefox window).
+
+Want to build or sign it yourself, or load it temporarily for development? See **[BUILD.md](BUILD.md)**.
 
 ## Setup
 
@@ -49,6 +60,7 @@ This puts unb8 in the same everyday category as **reader mode, dark‑mode and a
 *   `manifest.json`: Extension configuration (MV3).
 *   `background.js`: Service worker — caching, article fetching, OpenRouter calls with free-model fallback chain.
 *   `content.js`: Injected script — finds teaser headlines (and article pages) and updates the DOM.
-*   `offscreen.html` / `offscreen.js`: Hidden document used for safe HTML parsing (service workers have no DOMParser).
+*   `parser.js`: Shared HTML→text extraction — used inline on Firefox and via the offscreen document on Chrome.
+*   `offscreen.html` / `offscreen.js`: Chrome-only hidden document for HTML parsing (its service worker has no DOMParser); Firefox parses inline in its background event page.
 *   `popup.html` / `popup.js`: Settings UI with enable/disable and article-rewrite toggles.
 *   `onboarding.html` / `onboarding.js`: First-run setup guide.
