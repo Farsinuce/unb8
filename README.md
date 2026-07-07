@@ -13,7 +13,7 @@
 *   **On/off toggles:** The popup has switches to disable the whole extension or enable **article-page rewriting**, which condenses the full article text and removes filler — including the inline "Kort nyt" short-news items on dr.dk (off by default).
 *   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
-*   **Local Caching:** Saves generated titles for 2 days to minimize API usage.
+*   **Local Caching:** Remembers generated titles for 2 days to minimize API usage.
 
 
 ## Installation
