@@ -1,2 +1,7 @@
 # Original extension kept locally for reference only — not part of this fork
 unbait-original/
+
+# Local dev / handover docs — kept locally, not needed by extension users
+CLAUDE.md
+PROJECT_STATUS.md
+dr_article.html

@@ -19,11 +19,10 @@
 
 Since this extension is not yet in the Chrome Web Store, you can install it manually:
 
-1.  **Download:** Download this project folder to your computer.
-2.  **Open Extensions:** In a Chromium browser like Vivaldi (or Chrome/Edge/Brave), go to `chrome://extensions/`.
-3.  **Enable Developer Mode:** Toggle the switch in the top right corner.
-4.  **Load Unpacked:** Click the "Load unpacked" button.
-5.  **Select Folder:** Select the `unb8` folder inside this project.
+1.  **Download & unzip:** [Download the ZIP](https://github.com/Farsinuce/unb8/archive/refs/heads/main.zip) and extract it. The extension itself is the `unb8` subfolder inside.
+2.  **Open Extensions:** In a Chromium browser (Chrome/Edge/Brave/Vivaldi), go to `chrome://extensions/`.
+3.  **Enable Developer Mode:** Toggle the switch in the top-right corner.
+4.  **Load Unpacked:** Click **"Load unpacked"** and select the `unb8` folder from the unzipped download.
 
 ## Setup
 
@@ -40,5 +39,3 @@ Since this extension is not yet in the Chrome Web Store, you can install it manu
 *   `offscreen.html` / `offscreen.js`: Hidden document used for safe HTML parsing (service workers have no DOMParser).
 *   `popup.html` / `popup.js`: Settings UI with enable/disable and article-rewrite toggles.
 *   `onboarding.html` / `onboarding.js`: First-run setup guide.
-
-See `PROJECT_STATUS.md` for per-site selector details and current status.
