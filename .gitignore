@@ -7,9 +7,14 @@ PROJECT_STATUS.md
 FIREFOX_PORT_PLAN.md
 dr_article.html
 
-# Build artifacts — packaged/signed extension bundles, rebuilt on demand
+# Build artifacts — unsigned / intermediate bundles (rebuilt on demand)
 *.xpi
 web-ext-artifacts/
+# ...but DO track the published, signed release users download
+!dist/*.xpi
+
+# web-ext signing state (local tooling cache, not part of the extension)
+.amo-upload-uuid
 
 # Editor / workspace files
 unbait2.code-workspace

@@ -11,7 +11,7 @@ const FREE_MODEL_CHAIN = [
 
 const CACHE_PREFIX_TITLE = 'unbait_cache_v2_';
 const CACHE_PREFIX_REWRITE = 'unbait_rewrite_v1_';
-const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const CACHE_TTL_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
 // Setup offscreen document for HTML parsing. The creation promise is cached so
 // concurrent callers don't race createDocument ("Only a single offscreen document

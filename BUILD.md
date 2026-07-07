@@ -55,7 +55,9 @@ yourself (e.g. a GitHub Release).
 1. Bump `"version"` in `unb8/manifest.json` (Mozilla refuses to re-sign a version
    that already exists).
 2. Sign (command above).
-3. Publish the signed `.xpi` — e.g. attach it to a GitHub Release.
+3. Copy the signed `.xpi` from `web-ext-artifacts/` over `dist/unb8.xpi` and commit
+   it — the README's Firefox download link points at that stable filename, so it
+   never needs updating.
 
 ## Chrome packaging
 

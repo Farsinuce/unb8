@@ -13,7 +13,7 @@
 *   **On/off toggles:** The popup has switches to disable the whole extension or enable **article-page rewriting**, which condenses the full article text and removes filler — including the inline "Kort nyt" short-news items on dr.dk (off by default).
 *   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
-*   **Local Caching:** Saves generated titles for 7 days to minimize API usage.
+*   **Local Caching:** Saves generated titles for 2 days to minimize API usage.
 
 
 ## Installation
@@ -31,8 +31,8 @@ Since this extension is not yet in the Chrome Web Store, you can install it manu
 
 Firefox requires add-ons to be Mozilla-signed, so install the signed package rather than an unpacked folder:
 
-1.  **Download** the latest `unb8-*.xpi` from the [Releases page](https://github.com/Farsinuce/unb8/releases).
-2.  **Install it:** open `about:addons` → the gear ⚙ → **Install Add-on From File…**, pick the `.xpi`, and confirm (or simply drag the `.xpi` onto a Firefox window).
+1.  **Download** the signed [**unb8.xpi**](https://github.com/Farsinuce/unb8/raw/main/dist/unb8.xpi).
+2.  **Install it:** open `about:addons` → the gear ⚙ → **Install Add-on From File…**, pick the downloaded `unb8.xpi`, and confirm (or simply drag the file onto a Firefox window).
 
 Want to build or sign it yourself, or load it temporarily for development? See **[BUILD.md](BUILD.md)**.
 
@@ -45,15 +45,15 @@ Want to build or sign it yourself, or load it temporarily for development? See *
 
 ## Legal
 
-unb8 only changes what *you* see in *your own* browser, and never changes anything anyone else sees.
+unb8 changes only what *you* see in *your own* browser — nothing is shared, published, or shown to anyone else, and clicking the 🎣 restores the original instantly. The publisher's servers are untouched and keep serving the original headline to everyone else.
 
-Danish copyright law ([Ophavsretsloven § 2](https://danskelove.dk/ophavsretsloven/2)) reserves two things to the author: making copies of a work, and **making it available *to the public*** (*tilgængeliggørelse for almenheden*). unb8 does neither in any way the law restricts:
+Danish copyright law ([Ophavsretsloven § 2](https://danskelove.dk/ophavsretsloven/2)) reserves two acts to the author: **making copies**, and **making a work available *to the public*** (*tilgængeliggørelse for almenheden*). unb8 does neither in a way the law restricts:
 
-*   **Nothing is published or shared.** The rewritten headline is painted only into your own browser tab, for your eyes only. It is never redistributed, hosted, or shown to another reader — and a click on the 🎣 restores the original instantly. The publisher's servers are unaffected and keep serving the original headline to everyone else. Because there is no *public*, the "making available to the public" right is never triggered at all.
-*   **The copies involved are private and permitted.** The copies your browser makes just to *display* a page you're allowed to read are exempt "transient copies": the EU Court of Justice held in *PRCA v NLA* ([C‑360/13](https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=CELEX:62013CJ0360), 2014) that merely viewing a web page is not copyright infringement and needs no permission. unb8 only ever reads pages that are freely served to your browser, and the private, non‑commercial, single‑user copy used to generate a cleaner headline falls under the private‑copying right ([Ophavsretsloven § 12](https://danskelove.dk/ophavsretsloven/12)).
-*   **It's a tool, not a service.** unb8 is **not** published to the Chrome Web Store (or any store), runs entirely on your own machine, has no central server, and uses *your own* OpenRouter API key. There is no operator collecting, transforming, or re‑publishing anyone's content — so there is no "many" for the content to reach.
+*   **No public.** The rewritten headline exists only in your own tab, for your eyes only, so the making-available right is never triggered.
+*   **Private copies only.** The copies your browser makes just to *display* a page are the exempt "transient copies" confirmed in *PRCA v NLA* ([C‑360/13](https://eur-lex.europa.eu/legal-content/EN/ALL/?uri=CELEX:62013CJ0360), 2014) — merely viewing a freely served page is not infringement. The extra copy unb8 makes — fetching the article and sending it to *your own* AI to draft a cleaner headline — is a private, non-commercial, single-user copy under the private-copying right ([§ 12](https://danskelove.dk/ophavsretsloven/12)).
+*   **A tool, not a service.** unb8 runs entirely on your own machine with *your own* OpenRouter API key: no store listing, no central server, no operator re-publishing anyone's content to the public.
 
-This puts unb8 in the same everyday category as **reader mode, dark‑mode and accessibility extensions, ad blockers, and in‑browser translation** (Google Translate literally rewrites the visible text of a copyrighted page) — all of which reformat someone else's page inside your own browser and are universally treated as lawful. Functionally, unb8 is a pair of reading glasses for clickbait.
+unb8 reads only pages already served to your browser — it never bypasses paywalls or access controls — and is for personal use under each site's terms. That puts it in the same everyday category as **reader mode, accessibility and dark-mode extensions, ad blockers, and in-browser translation** (Google Translate literally rewrites the visible text of a copyrighted page) — tools that reformat someone else's page inside your own browser. Functionally, unb8 is a pair of reading glasses for clickbait.
 
 ## Development
 
