@@ -227,6 +227,7 @@ function buildHeadlinePrompt(articleText) {
 Read the following article text and generate a single, factual, non-clickbait headline in Danish.
 The headline should be descriptive and summarize the main point of the article.
 Do not use "Breaking", "Chok", "Afsløring" or similar sensationalist words.
+Write in natural, correct Danish and always keep the Danish letters æ, ø and å — never transliterate them to a, o, ae, oe or aa (e.g. write "23-årig", never "23-arig").
 Keep it under 100 characters if possible.
 ONLY output the headline, nothing else.
 
@@ -241,6 +242,7 @@ Rewrite the article below in Danish following these rules:
 - Then a blank line.
 - Then a condensed version of the article: keep every key fact, number, name, date and quote, but remove repetition, teaser phrases and filler.
 - Use short paragraphs separated by blank lines.
+- Write in natural, correct Danish and always keep the Danish letters æ, ø and å — never transliterate them to a, o, ae, oe or aa (e.g. write "23-årig", never "23-arig").
 - Do not add information that is not in the article.
 - Plain text only: no markdown, no bullet points, no headings, no commentary.
 
@@ -353,15 +355,16 @@ async function tryModel(apiKey, model, prompt, maxTokens) {
       messages: [
         { role: 'user', content: prompt }
       ],
-      // Free models cost nothing, so give reasoning models headroom; paid models
-      // stay capped to avoid "insufficient credits" pre-checks on low-tier accounts.
-      max_tokens: maxTokens
+      // Paid models stay capped to avoid "insufficient credits" pre-checks on
+      // low-tier accounts; free models get headroom (they cost nothing).
+      max_tokens: maxTokens,
+      // De-clickbaiting a headline or condensing an article needs no chain-of-
+      // thought. Reasoning tokens count against max_tokens, so on a reasoning model
+      // (paid Gemini, but also the free Nemotron / GPT-OSS in the fallback chain)
+      // "thinking" silently eats the whole budget and returns empty content — the
+      // main reason the free chain used to fail on all but the plain Gemma models.
+      reasoning: { enabled: false }
     };
-    if (!model.endsWith(':free')) {
-      // Paid Gemini models think by default and reasoning tokens count against
-      // max_tokens — under the low paid cap that yields empty content every time.
-      requestBody.reasoning = { enabled: false };
-    }
 
     const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', 60000, {
       method: 'POST',

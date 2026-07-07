@@ -43,6 +43,8 @@ Want to build or sign it yourself, or load it temporarily for development? See *
 3.  Paste your key and click **Save & Test**.
 4.  Visit any supported news site and enjoy a cleaner news feed!
 
+> **Tip:** the free models work, but they are rate-limited and slower. Selecting the paid **Gemini Flash** model (needs a little OpenRouter credit) gives a noticeably better and faster experience.
+
 ## Legal
 
 unb8 changes only what *you* see in *your own* browser — nothing is shared, published, or shown to anyone else, and clicking the 🎣 restores the original instantly. The publisher's servers are untouched and keep serving the original headline to everyone else.
