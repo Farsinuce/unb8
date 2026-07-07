@@ -108,9 +108,18 @@ function getSiteConfig() {
 }
 
 const config = getSiteConfig();
-const settings = { enabled: true, rewriteArticles: false };
+const settings = { enabled: true, rewriteArticles: false, lazyLoad: true };
 let observer = null;
 let scanTimer = null;
+// Shared IntersectionObserver for viewport-lazy dispatch: teasers and inline items
+// below the fold are only fetched + sent to the LLM once they scroll near view, so
+// content the user never reaches costs no tokens. Created in start(), torn down in stop().
+let lazyIO = null;
+const LAZY_IO_MARGIN = '300px'; // pre-zone: start a teaser's round-trip just before it's visible
+// Elements currently registered with lazyIO (below the fold, awaiting scroll). Tracked so
+// we can unobserve nodes dr.dk virtualizes away before they ever intersect (the observer
+// would otherwise pin them for the page's lifetime) and reject stale queued intersections.
+const observedNodes = new Set();
 // Original article-page state for the rewrite feature (too large for data attributes)
 let articleState = null;
 // Per-item state for inline "Kort nyt" short-news articles (headline + optional body).
@@ -124,9 +133,10 @@ if (config) {
 }
 
 async function init() {
-  const stored = await chrome.storage.local.get(['extensionEnabled', 'rewriteArticles']);
+  const stored = await chrome.storage.local.get(['extensionEnabled', 'rewriteArticles', 'lazyLoad']);
   settings.enabled = stored.extensionEnabled !== false; // default: on
   settings.rewriteArticles = stored.rewriteArticles === true; // default: off
+  settings.lazyLoad = stored.lazyLoad !== false; // default: on (viewport-lazy dispatch)
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local') return;
@@ -150,6 +160,16 @@ async function init() {
         processInlineArticles();
       }
     }
+    if (changes.lazyLoad) {
+      settings.lazyLoad = changes.lazyLoad.newValue !== false;
+      if (settings.enabled) {
+        // Switch dispatch mode cleanly: tear down and rebuild so pending observations
+        // and applied headlines are reconciled under the new mode (the cache makes the
+        // re-scan's refetches instant). Reuses the proven disable→enable path.
+        stop();
+        start();
+      }
+    }
   });
 
   if (settings.enabled) {
@@ -159,6 +179,9 @@ async function init() {
 
 function start() {
   console.log('unb8: Active on', window.location.hostname);
+  // Only stand up the lazy observer when the feature is on; when off, lazyIO stays null
+  // and the dispatch routes fall through to immediate (eager) processing — the old method.
+  if (settings.lazyLoad && !lazyIO) lazyIO = createLazyIO();
   scanPage();
 
   if (!observer) {
@@ -178,6 +201,13 @@ function stop() {
     observer.disconnect();
     observer = null;
   }
+  // Disconnect the lazy observer so no below-fold item can dispatch a (token-spending)
+  // LLM call after the user disables the extension. Recreated by start() on re-enable.
+  if (lazyIO) {
+    lazyIO.disconnect();
+    lazyIO = null;
+  }
+  observedNodes.clear();
   clearTimeout(scanTimer);
   articleEpoch++; // drop in-flight article/inline responses
   revertAllTeasers();
@@ -188,6 +218,7 @@ function stop() {
 
 function scanPage() {
   if (!settings.enabled) return;
+  pruneObservedNodes(); // release observations for nodes the page has since removed
   processArticles();
   processInlineArticles();
   processArticlePage();
@@ -227,49 +258,131 @@ function getOriginalTitle(cfg, titleEl, link) {
 }
 
 // ---------------------------------------------------------------------------
+// Viewport-lazy dispatch helpers (shared by teasers and inline short-news items)
+// ---------------------------------------------------------------------------
+
+// True when the element's box overlaps the viewport. A zero-size rect (not yet laid out
+// / hidden) counts as NOT in view, so such an item is deferred to the observer and picked
+// up once it lays out and intersects — never eagerly dispatched on a bogus measurement.
+function isInViewport(el) {
+  const r = el.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return false;
+  return r.top < window.innerHeight && r.bottom > 0 &&
+         r.left < window.innerWidth && r.right > 0;
+}
+
+// One IntersectionObserver shared by teasers and inline items: the LLM call is made only
+// when an item scrolls within LAZY_IO_MARGIN of the viewport (one-shot per element via
+// unobserve), so content the user never reaches costs no fetch and no tokens.
+function createLazyIO() {
+  return new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+      const el = entry.target;
+      // Skip a stale entry whose target we already unobserved (revert / mode toggle /
+      // prune) after this intersection was queued — stops a re-claimed item being
+      // dispatched twice, which would corrupt its toggle-back original title.
+      if (!observedNodes.has(el)) continue;
+      unobserveLazy(el);
+      if (!settings.enabled) continue; // disabled after observing → don't spend a call
+      if (config.inlineArticle && el.matches(config.inlineArticle.containerSelector)) {
+        dispatchInlineArticle(el);
+      } else {
+        dispatchTeaser(el);
+      }
+    }
+  }, { rootMargin: LAZY_IO_MARGIN });
+}
+
+// Register / cancel a below-fold item with the lazy observer, keeping observedNodes in
+// sync so it can be pruned and de-duped. unobserveLazy is null-safe, so a stale IO
+// callback delivered after stop() nulled lazyIO simply no-ops.
+function observeLazy(el) {
+  observedNodes.add(el);
+  lazyIO.observe(el);
+}
+function unobserveLazy(el) {
+  observedNodes.delete(el);
+  lazyIO?.unobserve(el);
+}
+
+// Drop observations for nodes the page removed from the DOM (dr.dk virtualizes its
+// timelines): a detached target never intersects, so it would never be unobserved and the
+// observer would retain it. Cheap — iterates only the still-pending (below-fold) items.
+function pruneObservedNodes() {
+  for (const el of observedNodes) {
+    if (!el.isConnected) unobserveLazy(el);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Teasers (front page, overview and category pages)
 // ---------------------------------------------------------------------------
 
-function processArticles() {
-  const articles = document.querySelectorAll(config.articleSelector);
+// Resolve a teaser's link, title element and article URL, or null if this node isn't a
+// valid article teaser (missing link/title, unparseable href, or a non-article URL).
+// Called at scan time (to decide whether to claim/observe) and again at dispatch time
+// (the observer fires later, so re-reading picks up late hydration — e.g. bt.dk aria-label).
+function resolveTeaser(article) {
+  const link = ownQuery(article, config.linkSelector);
+  const titleEl = ownQuery(article, config.titleSelector);
+  if (!link || !titleEl) return null;
+  let url;
+  try {
+    url = new URL(link.href, window.location.href);
+  } catch {
+    return null;
+  }
+  // Skip section links, video stories, DRTV, house content etc.
+  if (!config.isArticleUrl(url)) return null;
+  return { link, titleEl, url };
+}
 
-  articles.forEach(article => {
+function processArticles() {
+  document.querySelectorAll(config.articleSelector).forEach(article => {
     if (article.dataset.unbaitProcessed) return;
 
-    const link = ownQuery(article, config.linkSelector);
-    const titleEl = ownQuery(article, config.titleSelector);
-    if (!link || !titleEl) return;
+    // Validate BEFORE claiming: a non-article node (section link, video, or a not-yet-
+    // hydrated teaser) stays unclaimed so a later scan can re-check it.
+    if (!resolveTeaser(article)) return;
 
-    let url;
-    try {
-      url = new URL(link.href, window.location.href);
-    } catch {
+    // Claim it, then either dispatch now (on-screen, or lazy-load off) or hand it to the
+    // observer so a below-the-fold teaser is only fetched + sent once scrolled near.
+    article.dataset.unbaitProcessed = 'true';
+    if (lazyIO && !isInViewport(article)) {
+      observeLazy(article);
+    } else {
+      dispatchTeaser(article);
+    }
+  });
+}
+
+// Send one claimed teaser to the background for a de-clickbaited headline and swap it in.
+// Re-resolves from the live DOM (the observer may fire well after the scan that claimed
+// it). A response is dropped if the extension was disabled while the request was in flight.
+function dispatchTeaser(article) {
+  if (!settings.enabled) return;
+  const resolved = resolveTeaser(article);
+  if (!resolved) return;
+  const { link, titleEl, url } = resolved;
+  const originalTitle = getOriginalTitle(config, titleEl, link);
+
+  chrome.runtime.sendMessage({
+    action: 'generateTitle',
+    url: url.origin + url.pathname
+  }, (response) => {
+    if (chrome.runtime.lastError) {
+      console.log('unb8: message failed', chrome.runtime.lastError.message);
       return;
     }
-    // Skip section links, video stories, DRTV, house content etc.
-    if (!config.isArticleUrl(url)) return;
-
-    // Mark as processed immediately to avoid double processing
-    article.dataset.unbaitProcessed = 'true';
-    const originalTitle = getOriginalTitle(config, titleEl, link);
-
-    chrome.runtime.sendMessage({
-      action: 'generateTitle',
-      url: url.origin + url.pathname
-    }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.log('unb8: message failed', chrome.runtime.lastError.message);
-        return;
-      }
-      // Dropped if the user disabled the extension (which reverts and unflags
-      // the teaser) while this request was in flight
-      if (!settings.enabled || !article.dataset.unbaitProcessed) return;
-      if (response && response.success && response.title) {
-        applyNewTitle(article, titleEl, originalTitle, response.title, { fit: config.titleFit });
-      } else {
-        console.log('unb8: Failed to generate title for', url.href, response?.error);
-      }
-    });
+    // Dropped if the user disabled the extension (which reverts and unflags
+    // the teaser) while this request was in flight
+    if (!settings.enabled || !article.dataset.unbaitProcessed) return;
+    if (response && response.success && response.title) {
+      applyNewTitle(article, titleEl, originalTitle, response.title, { fit: config.titleFit });
+    } else {
+      console.log('unb8: Failed to generate title for', url.href, response?.error);
+    }
   });
 }
 
@@ -543,39 +656,66 @@ function processInlineArticles() {
     const body = article.querySelector(cfg.bodySelector);
     if (!titleEl || !body) return;
 
-    // Prefer the real paragraphs (skips the "Læs op" / glossary button noise); fall
-    // back to the whole body only if the paragraph markup ever changes.
-    const paras = article.querySelectorAll(cfg.paragraphSelector);
-    const text = (paras.length
-      ? Array.from(paras).map(p => p.innerText.trim()).join('\n\n')
-      : body.innerText).trim().substring(0, 6000);
     // Below 100 chars the background would try to fetch the (non-existent) URL, so skip.
-    if (text.length < 100) return;
+    if (readInlineText(cfg, article, body).length < 100) return;
 
+    // Claim it, then dispatch now (on-screen / lazy-load off) or defer to the observer.
     article.dataset.unbaitProcessed = 'true';
-    const originalTitle = titleEl.innerText.trim();
-    // These items have no permalink, so cache by a stable synthetic key. Hash the
-    // body too, so two items sharing a headline can't collide onto one rewrite.
-    const key = `shortnews://${window.location.hostname}/${hashString(originalTitle + ' ' + text)}`;
-
-    const epoch = articleEpoch;
-
-    // With "Unbait article pages" on, these inline items get the full treatment
-    // (headline + condensed body); otherwise just the de-clickbaited headline.
-    if (settings.rewriteArticles && text.length >= 200) {
-      chrome.runtime.sendMessage({ action: 'rewriteArticle', url: key, title: originalTitle, text }, (response) => {
-        if (chrome.runtime.lastError || !isInlineResponseCurrent(epoch, article)) return;
-        if (response && response.success) {
-          applyInlineArticle(cfg, article, titleEl, body, originalTitle, response.title, response.paragraphs);
-        } else {
-          console.log('unb8: inline rewrite failed, falling back to headline only.', response?.error);
-          requestInlineHeadline(cfg, article, titleEl, body, key, originalTitle, text, epoch);
-        }
-      });
+    if (lazyIO && !isInViewport(article)) {
+      observeLazy(article);
     } else {
-      requestInlineHeadline(cfg, article, titleEl, body, key, originalTitle, text, epoch);
+      dispatchInlineArticle(article);
     }
   });
+}
+
+// The inline item's body text: prefer the real paragraphs (skips the "Læs op" / glossary
+// button noise), fall back to the whole body only if the paragraph markup ever changes.
+// Trimmed and capped. Shared by the length gate (scan time) and the dispatch.
+function readInlineText(cfg, article, body) {
+  const paras = article.querySelectorAll(cfg.paragraphSelector);
+  return (paras.length
+    ? Array.from(paras).map(p => p.innerText.trim()).join('\n\n')
+    : body.innerText).trim().substring(0, 6000);
+}
+
+// Send one claimed inline "Kort nyt" item for a headline (and, in rewrite mode, a
+// condensed body) and swap it in. Re-reads title/body/text from the live DOM and captures
+// the epoch at fire time, so an item deferred across a rewrite-mode toggle is sent in the
+// CURRENT mode and stale responses are still dropped by isInlineResponseCurrent.
+function dispatchInlineArticle(article) {
+  if (!settings.enabled) return;
+  const cfg = config.inlineArticle;
+  if (!cfg) return;
+  const titleEl = article.querySelector(cfg.titleSelector);
+  const body = article.querySelector(cfg.bodySelector);
+  if (!titleEl || !body) return;
+
+  const text = readInlineText(cfg, article, body);
+  if (text.length < 100) return;
+
+  const originalTitle = titleEl.innerText.trim();
+  // These items have no permalink, so cache by a stable synthetic key. Hash the
+  // body too, so two items sharing a headline can't collide onto one rewrite.
+  const key = `shortnews://${window.location.hostname}/${hashString(originalTitle + ' ' + text)}`;
+
+  const epoch = articleEpoch;
+
+  // With "Unbait article pages" on, these inline items get the full treatment
+  // (headline + condensed body); otherwise just the de-clickbaited headline.
+  if (settings.rewriteArticles && text.length >= 200) {
+    chrome.runtime.sendMessage({ action: 'rewriteArticle', url: key, title: originalTitle, text }, (response) => {
+      if (chrome.runtime.lastError || !isInlineResponseCurrent(epoch, article)) return;
+      if (response && response.success) {
+        applyInlineArticle(cfg, article, titleEl, body, originalTitle, response.title, response.paragraphs);
+      } else {
+        console.log('unb8: inline rewrite failed, falling back to headline only.', response?.error);
+        requestInlineHeadline(cfg, article, titleEl, body, key, originalTitle, text, epoch);
+      }
+    });
+  } else {
+    requestInlineHeadline(cfg, article, titleEl, body, key, originalTitle, text, epoch);
+  }
 }
 
 function requestInlineHeadline(cfg, article, titleEl, body, key, originalTitle, text, epoch) {
@@ -659,7 +799,7 @@ function revertInlineArticles() {
   // ones not in the map) so a re-enable / mode change can re-scan them.
   if (cfg) {
     document.querySelectorAll(`${cfg.containerSelector}[data-unbait-processed]`)
-      .forEach(a => delete a.dataset.unbaitProcessed);
+      .forEach(a => { delete a.dataset.unbaitProcessed; unobserveLazy(a); });
   }
 }
 

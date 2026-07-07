@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const modelSelect = document.getElementById('model');
   const enabledToggle = document.getElementById('extensionEnabled');
   const rewriteToggle = document.getElementById('rewriteArticles');
+  const lazyToggle = document.getElementById('lazyLoad');
   const saveButton = document.getElementById('save');
   const testButton = document.getElementById('test');
   const clearCacheButton = document.getElementById('clearCache');
@@ -30,7 +31,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function renderCounter(usage) {
     const total = (usage && usage.total) || 0;
-    tokenCounter.textContent = total > 0 ? `${formatTokens(total)} tokens used` : ' ';
+    if (total <= 0) { tokenCounter.textContent = ' '; return; }
+    // `cost` is OpenRouter's OWN reported charge — usage.cost, requested via
+    // usage:{include:true} on every call and summed in background.js — i.e. the actual
+    // credits spent (1 credit = $1), NOT a client-side tokens×price estimate. Free (:free)
+    // models report exactly 0, so "· free" is literally true; paid shows the real spend
+    // (4 decimals under 1¢, else 2). No "~": this is measured, not guessed.
+    const cost = (usage && usage.cost) || 0;
+    const costStr = cost > 0
+      ? ` · $${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
+      : ' · free';
+    tokenCounter.textContent = `${formatTokens(total)} tokens used${costStr}`;
   }
 
   chrome.storage.local.get(USAGE_KEY, (r) => renderCounter(r[USAGE_KEY]));
@@ -39,7 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Load saved settings
-  chrome.storage.local.get(['openRouterApiKey', 'selectedModel', 'extensionEnabled', 'rewriteArticles'], (result) => {
+  chrome.storage.local.get(['openRouterApiKey', 'selectedModel', 'extensionEnabled', 'rewriteArticles', 'lazyLoad'], (result) => {
     if (result.openRouterApiKey) {
       apiKeyInput.value = result.openRouterApiKey;
     }
@@ -47,6 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!modelSelect.value) modelSelect.value = 'auto'; // stored model no longer in the list
     enabledToggle.checked = result.extensionEnabled !== false; // default: on
     rewriteToggle.checked = result.rewriteArticles === true;   // default: off
+    lazyToggle.checked = result.lazyLoad !== false;            // default: on
   });
 
   // Toggles save immediately
@@ -61,6 +73,14 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus(rewriteToggle.checked
         ? 'Article rewriting enabled. Reload the article page to apply.'
         : 'Article rewriting disabled.', 'success');
+    });
+  });
+
+  lazyToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ lazyLoad: lazyToggle.checked }, () => {
+      showStatus(lazyToggle.checked
+        ? 'Prioritizing visible headlines — others load as you scroll.'
+        : 'Processing whole page on load (old method).', 'success');
     });
   });
 

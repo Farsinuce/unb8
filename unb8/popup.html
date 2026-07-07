@@ -45,6 +45,17 @@
       </label>
     </div>
 
+    <div class="toggle-row">
+      <div class="toggle-text">
+        <span class="toggle-title">Prioritize visible headlines</span>
+        <span class="toggle-desc">Rewrite headlines as you scroll to them, not the whole page at once — saves tokens on articles you never reach. Off = process everything on load (the old method).</span>
+      </div>
+      <label class="switch">
+        <input type="checkbox" id="lazyLoad">
+        <span class="slider"></span>
+      </label>
+    </div>
+
     <div class="form-group">
       <label for="apiKey">OpenRouter API Key:</label>
       <input type="password" id="apiKey" placeholder="sk-or-...">
@@ -63,7 +74,8 @@
           <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
         </optgroup>
         <optgroup label="Paid models">
-          <option value="~google/gemini-flash-latest">Gemini Flash (latest, paid)</option>
+          <option value="google/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (paid — cheaper)</option>
+          <option value="~google/gemini-flash-latest">Gemini Flash latest (paid — newest, pricier)</option>
         </optgroup>
       </select>
       <p class="help-text">If the chosen model fails (rate limit, downtime), unb8 automatically falls back to the free models.</p>
@@ -86,7 +98,7 @@
 
     <div style="margin-top: 18px; font-size: 12px; text-align: center;">
       <a href="onboarding.html" target="_blank">Open Setup Guide</a>
-      <p class="help-text" id="tokenCounter" style="margin-top: 8px;">&nbsp;</p>
+      <p class="help-text" id="tokenCounter" title="Total OpenRouter tokens used since install — across every teaser headline and article rewrite on all tabs, including automatic fallback retries when a free model is rate-limited. Free models cost nothing." style="margin-top: 8px;">&nbsp;</p>
     </div>
   </div>
   <script src="popup.js"></script>

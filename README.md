@@ -11,9 +11,11 @@
 *   **AI-Powered:** Reads the article content in the background and generates a non-clickbait title.
 *   **Free by default:** Uses free OpenRouter models (Gemma 4, Nemotron 3, GPT-OSS) with automatic fallback — if one model is rate-limited or down, the next one is tried.
 *   **On/off toggles:** The popup has switches to disable the whole extension or enable **article-page rewriting**, which condenses the full article text and removes filler — including the inline "Kort nyt" short-news items on dr.dk (off by default).
+*   **Token-saving by default:** Headlines are rewritten as you scroll to them, not the whole page at once — so teasers you never reach cost nothing (toggle off to process everything on load).
 *   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
 *   **Local Caching:** Remembers generated titles for 2 days to minimize API usage.
+*   **Usage meter:** The popup shows total tokens used and the real OpenRouter cost — free models read as "free".
 
 
 ## Installation
@@ -43,7 +45,7 @@ Want to build or sign it yourself, or load it temporarily for development? See *
 3.  Paste your key and click **Save & Test**.
 4.  Visit any supported news site and enjoy a cleaner news feed!
 
-> **Tip:** the free models work, but they are rate-limited and slower. Selecting the paid **Gemini Flash** model (needs a little OpenRouter credit) gives a noticeably better and faster experience.
+> **Tip:** the free models work, but they are rate-limited and slower. For a noticeably better and faster experience, pick a paid model (needs a little OpenRouter credit): **Gemini 3.1 Flash Lite** is the cheap option, while **Gemini Flash latest** is the newest but pricier.
 
 ## Legal
 
@@ -64,5 +66,5 @@ unb8 reads only pages already served to your browser — it never bypasses paywa
 *   `content.js`: Injected script — finds teaser headlines (and article pages) and updates the DOM.
 *   `parser.js`: Shared HTML→text extraction — used inline on Firefox and via the offscreen document on Chrome.
 *   `offscreen.html` / `offscreen.js`: Chrome-only hidden document for HTML parsing (its service worker has no DOMParser); Firefox parses inline in its background event page.
-*   `popup.html` / `popup.js`: Settings UI with enable/disable and article-rewrite toggles.
+*   `popup.html` / `popup.js`: Settings UI (enable/disable, article-rewrite, and lazy-load toggles; usage meter).
 *   `onboarding.html` / `onboarding.js`: First-run setup guide.
