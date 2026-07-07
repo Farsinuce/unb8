@@ -73,7 +73,7 @@ chrome.runtime.onInstalled.addListener((details) => {
   chrome.storage.local.get(USAGE_KEY, (r) => {
     if (!r[USAGE_KEY]) {
       chrome.storage.local.set({
-        [USAGE_KEY]: { total: 0, prompt: 0, completion: 0, calls: 0, cost: 0, since: Date.now() }
+        [USAGE_KEY]: { total: 0, prompt: 0, completion: 0, calls: 0, cost: 0, freeTotal: 0, paidTotal: 0, since: Date.now() }
       });
     }
   });
@@ -85,18 +85,27 @@ chrome.runtime.onInstalled.addListener((details) => {
 // (mirrors the creatingOffscreen pattern) — otherwise interleaved async writes lose
 // updates. Every field is null-guarded so a missing usage can't NaN-poison the total.
 let usageWriteChain = Promise.resolve();
-function recordUsage(usage) {
+function recordUsage(usage, isFree) {
   if (!usage) return usageWriteChain;
-  usageWriteChain = usageWriteChain.then(() => addUsage(usage)).catch((e) => {
+  usageWriteChain = usageWriteChain.then(() => addUsage(usage, isFree)).catch((e) => {
     console.warn('unb8: usage record failed', e);
   });
   return usageWriteChain;
 }
-async function addUsage(usage) {
+// `isFree` splits the token total into free- vs paid-model buckets so the popup can
+// show them separately (free reads as "free"; paid shows real cost). `cost` is
+// OpenRouter's own charge and is 0 for free models, so it already equals paid spend.
+async function addUsage(usage, isFree) {
   const cur = (await chrome.storage.local.get(USAGE_KEY))[USAGE_KEY] || {};
   const promptTok = usage.prompt_tokens || 0;
   const completionTok = usage.completion_tokens || 0;
   const totalTok = usage.total_tokens || (promptTok + completionTok);
+  // One-time migration: pre-split installs only had a combined `total`. Attribute it to
+  // the free bucket (historically almost all usage was the free chain) so the popup's
+  // free counter stays continuous instead of resetting to 0 on the first post-update call.
+  let curFree = cur.freeTotal, curPaid = cur.paidTotal;
+  if (curFree == null && curPaid == null) { curFree = cur.total || 0; curPaid = 0; }
+  else { curFree = curFree || 0; curPaid = curPaid || 0; }
   await chrome.storage.local.set({
     [USAGE_KEY]: {
       total: (cur.total || 0) + totalTok,
@@ -104,6 +113,8 @@ async function addUsage(usage) {
       completion: (cur.completion || 0) + completionTok,
       calls: (cur.calls || 0) + 1,
       cost: (cur.cost || 0) + (usage.cost || 0),
+      freeTotal: curFree + (isFree ? totalTok : 0),
+      paidTotal: curPaid + (isFree ? 0 : totalTok),
       since: cur.since || Date.now()
     }
   });
@@ -183,7 +194,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // Popup's Test Connection reports its usage here so it counts too.
   if (request.action === 'recordUsage') {
-    recordUsage(request.usage).then(() => sendResponse({ ok: true }));
+    recordUsage(request.usage, request.isFree).then(() => sendResponse({ ok: true }));
     return true;
   }
 
@@ -603,7 +614,7 @@ async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
     // reject the completion (empty / truncated) and fall back. Cache hits never reach
     // tryModel, so they can't inflate the counter. Serialized read-modify-write inside.
     if (data.usage) {
-      await recordUsage(data.usage);
+      await recordUsage(data.usage, model.endsWith(':free'));
     }
     const choice = data.choices?.[0];
     const content = choice?.message?.content;

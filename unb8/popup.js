@@ -4,15 +4,26 @@ document.addEventListener('DOMContentLoaded', () => {
   const enabledToggle = document.getElementById('extensionEnabled');
   const rewriteToggle = document.getElementById('rewriteArticles');
   const lazyToggle = document.getElementById('lazyLoad');
-  const saveButton = document.getElementById('save');
   const testButton = document.getElementById('test');
   const clearCacheButton = document.getElementById('clearCache');
   const cleanPageButton = document.getElementById('cleanPage');
+  const consentPanel = document.getElementById('universalConsent');
+  const consentAccept = document.getElementById('consentAccept');
+  const consentCancel = document.getElementById('consentCancel');
   const statusDiv = document.getElementById('status');
-  const tokenCounter = document.getElementById('tokenCounter');
+
+  // Usage panel
+  const usageFree = document.getElementById('usageFree');
+  const usagePaid = document.getElementById('usagePaid');
+  const usageEmpty = document.getElementById('usageEmpty');
+  const freeTokensEl = document.getElementById('freeTokens');
+  const paidCostEl = document.getElementById('paidCost');
+  const paidTokensEl = document.getElementById('paidTokens');
 
   const USAGE_KEY = 'unbait_usage_v1';
+  const CONSENT_KEY = 'universalConsent';
 
+  // --- Usage counter -------------------------------------------------------
   // Kept in sync with the identical helper in background.js (no build step to share it).
   // 1234 -> "1.2k", 999_500 -> "1M" (round the mantissa, then promote if it hits 1000).
   function formatTokens(n) {
@@ -29,19 +40,28 @@ document.addEventListener('DOMContentLoaded', () => {
     return (Number.isInteger(m) ? m : m.toFixed(1)) + units[idx].s;
   }
 
+  // Two independent lines: free-model tokens (which cost nothing) and paid-model spend.
+  // `cost` is OpenRouter's OWN reported charge (usage.cost, summed in background.js) — not
+  // a token×price estimate. Pre-split installs only stored `total`, so fall back to showing
+  // it as free (background.js migrates it into freeTotal on the next call).
   function renderCounter(usage) {
-    const total = (usage && usage.total) || 0;
-    if (total <= 0) { tokenCounter.textContent = ' '; return; }
-    // `cost` is OpenRouter's OWN reported charge — usage.cost, requested via
-    // usage:{include:true} on every call and summed in background.js — i.e. the actual
-    // credits spent (1 credit = $1), NOT a client-side tokens×price estimate. Free (:free)
-    // models report exactly 0, so "· free" is literally true; paid shows the real spend
-    // (4 decimals under 1¢, else 2). No "~": this is measured, not guessed.
-    const cost = (usage && usage.cost) || 0;
-    const costStr = cost > 0
-      ? ` · $${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2)}`
-      : ' · free';
-    tokenCounter.textContent = `${formatTokens(total)} tokens used${costStr}`;
+    usage = usage || {};
+    const freeTotal = (usage.freeTotal != null) ? usage.freeTotal : (usage.total || 0);
+    const paidTotal = usage.paidTotal || 0;
+    const cost = usage.cost || 0;
+
+    const hasFree = freeTotal > 0;
+    const hasPaid = paidTotal > 0 || cost > 0;
+
+    usageFree.style.display = hasFree ? 'block' : 'none';
+    usagePaid.style.display = hasPaid ? 'block' : 'none';
+    usageEmpty.style.display = (hasFree || hasPaid) ? 'none' : 'block';
+
+    if (hasFree) freeTokensEl.textContent = formatTokens(freeTotal);
+    if (hasPaid) {
+      paidCostEl.textContent = '$' + (cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2));
+      paidTokensEl.textContent = paidTotal > 0 ? `(${formatTokens(paidTotal)} tokens)` : '';
+    }
   }
 
   chrome.storage.local.get(USAGE_KEY, (r) => renderCounter(r[USAGE_KEY]));
@@ -49,11 +69,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (area === 'local' && changes[USAGE_KEY]) renderCounter(changes[USAGE_KEY].newValue);
   });
 
-  // Load saved settings
+  // --- Load saved settings -------------------------------------------------
   chrome.storage.local.get(['openRouterApiKey', 'selectedModel', 'extensionEnabled', 'rewriteArticles', 'lazyLoad'], (result) => {
-    if (result.openRouterApiKey) {
-      apiKeyInput.value = result.openRouterApiKey;
-    }
+    if (result.openRouterApiKey) apiKeyInput.value = result.openRouterApiKey;
     modelSelect.value = result.selectedModel || 'auto';
     if (!modelSelect.value) modelSelect.value = 'auto'; // stored model no longer in the list
     enabledToggle.checked = result.extensionEnabled !== false; // default: on
@@ -61,7 +79,7 @@ document.addEventListener('DOMContentLoaded', () => {
     lazyToggle.checked = result.lazyLoad !== false;            // default: on
   });
 
-  // Toggles save immediately
+  // --- Everything saves instantly (no "Save" button) -----------------------
   enabledToggle.addEventListener('change', () => {
     chrome.storage.local.set({ extensionEnabled: enabledToggle.checked }, () => {
       showStatus(enabledToggle.checked ? 'unb8 enabled.' : 'unb8 disabled.', 'success');
@@ -84,28 +102,22 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Save settings
-  saveButton.addEventListener('click', () => {
-    const apiKey = apiKeyInput.value.trim();
-    const model = modelSelect.value;
-
-    if (!apiKey) {
-      showStatus('Please enter an API Key.', 'error');
-      return;
-    }
-
-    chrome.storage.local.set({
-      openRouterApiKey: apiKey,
-      selectedModel: model
-    }, () => {
-      showStatus('Settings saved!', 'success');
-      setTimeout(() => {
-        statusDiv.style.display = 'none';
-      }, 2000);
+  modelSelect.addEventListener('change', () => {
+    chrome.storage.local.set({ selectedModel: modelSelect.value }, () => {
+      showStatus('Model saved.', 'success');
     });
   });
 
-  // Test Connection
+  // Save the key immediately on each edit (robust if the popup closes mid-typing);
+  // the "saved" toast is debounced so it doesn't flash on every keystroke.
+  let keyToastTimer = null;
+  apiKeyInput.addEventListener('input', () => {
+    chrome.storage.local.set({ openRouterApiKey: apiKeyInput.value.trim() });
+    clearTimeout(keyToastTimer);
+    keyToastTimer = setTimeout(() => showStatus('API key saved.', 'success'), 500);
+  });
+
+  // --- Test Connection -----------------------------------------------------
   testButton.addEventListener('click', async () => {
     const apiKey = apiKeyInput.value.trim();
     const model = modelSelect.value === 'auto' ? 'google/gemma-4-31b-it:free' : modelSelect.value;
@@ -148,7 +160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Count this call's tokens too, via the background accumulator.
       if (data.usage) {
-        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage });
+        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage, isFree: model.endsWith(':free') });
       }
 
       if (data.choices && data.choices.length > 0) {
@@ -165,10 +177,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Clean this page (experimental universal mode): inject universal.js into the
-  // active tab. Opening the popup granted activeTab for that tab, so no host
-  // permission is needed. http(s) only — executeScript rejects chrome:/about:/file:.
+  // --- Clean this page (experimental universal mode) -----------------------
+  // First use shows a one-time consent panel (explaining what gets sent where);
+  // after the user accepts once, later clicks inject straight away.
   cleanPageButton.addEventListener('click', () => {
+    chrome.storage.local.get(CONSENT_KEY, (r) => {
+      if (r[CONSENT_KEY]) {
+        runCleanPage();
+      } else {
+        consentPanel.classList.add('show');
+      }
+    });
+  });
+
+  consentCancel.addEventListener('click', () => consentPanel.classList.remove('show'));
+
+  consentAccept.addEventListener('click', () => {
+    chrome.storage.local.set({ [CONSENT_KEY]: true }, () => {
+      consentPanel.classList.remove('show');
+      runCleanPage();
+    });
+  });
+
+  // Inject parser.js (shared HTML->text extractor, reused to read same-origin articles)
+  // then universal.js into the active tab. Opening the popup granted activeTab for that
+  // tab, so no host permission is needed. http(s) only — executeScript rejects
+  // chrome:/about:/file: pages. The injected script keeps running (and shows its own
+  // on-page control) after this popup closes, which it will as soon as focus leaves it.
+  function runCleanPage() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs && tabs[0];
       if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) {
@@ -176,18 +212,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
       cleanPageButton.disabled = true;
-      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['universal.js'] }, () => {
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['parser.js', 'universal.js'] }, () => {
         cleanPageButton.disabled = false;
         if (chrome.runtime.lastError) {
           showStatus(`Failed: ${chrome.runtime.lastError.message}`, 'error');
         } else {
-          showStatus('Cleaning this page… scroll to process headlines.', 'success');
+          showStatus('Cleaning this page — a floating control appears on the page. You can close this popup.', 'success');
         }
       });
     });
-  });
+  }
 
-  // Clear cached headlines/rewrites
+  // --- Clear cached headlines/rewrites -------------------------------------
   clearCacheButton.addEventListener('click', () => {
     chrome.storage.local.get(null, (all) => {
       const keys = Object.keys(all).filter(k => k.startsWith('unbait_cache_') || k.startsWith('unbait_rewrite_'));

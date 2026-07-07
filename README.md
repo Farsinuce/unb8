@@ -15,7 +15,8 @@
 *   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
 *   **Local Caching:** Remembers generated titles for 2 days to minimize API usage.
-*   **Usage meter:** The popup shows total tokens used and the real OpenRouter cost — free models read as "free".
+*   **Usage meter:** The popup shows tokens used on free models (which read as "free") and, separately, the real OpenRouter cost once you use a paid model.
+*   **Clean this page (experimental):** A popup button that de-clickbaits headlines on *any* site — for same-site article links it reads a little of the article behind the headline for a proper rewrite. A floating on-page control shows progress with a Stop button.
 
 
 ## Installation

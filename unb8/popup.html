@@ -6,22 +6,82 @@
   <title>unb8 Settings</title>
   <link rel="stylesheet" href="common.css">
   <style>
-    body {
-      width: 350px;
-      padding: 15px;
+    body { width: 350px; padding: 15px; }
+    .container { padding: 0; box-shadow: none; }
+    h1 { font-size: 18px; margin-bottom: 10px; }
+
+    /* Usage panel — top priority */
+    .usage-panel {
+      background: #f5f7fa; border: 1px solid #e3e8ef; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 12px;
     }
-    .container {
-      padding: 0;
-      box-shadow: none;
+    .usage-line { font-size: 13px; color: #333; }
+    .usage-line + .usage-line { margin-top: 4px; }
+    .usage-line .val { font-weight: 700; }
+    .usage-free .tag { color: #2e7d32; font-weight: 600; }
+    .usage-paid { color: #b26a00; }
+    .usage-empty { font-size: 12px; color: #888; }
+
+    /* Clean-this-page row */
+    .clean-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+    #cleanPage { width: auto; margin: 0; padding: 7px 12px; font-size: 13px; }
+    .badge {
+      font-size: 9px; font-weight: 700; letter-spacing: 0.3px; color: #b26a00;
+      background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; padding: 1px 5px;
     }
-    h1 {
-      font-size: 18px;
+
+    /* First-run consent panel for Clean this page */
+    .consent {
+      display: none; background: #fff8e1; border: 1px solid #ffe0b2; border-radius: 8px;
+      padding: 10px 12px; margin-bottom: 12px; font-size: 12px; color: #5f4b00; line-height: 1.5;
     }
+    .consent.show { display: block; }
+    .consent .actions { display: flex; gap: 8px; margin-top: 8px; }
+    .consent .actions button { width: auto; margin: 0; padding: 5px 12px; font-size: 12px; }
+
+    hr.sep { border: none; border-top: 1px solid #eee; margin: 14px 0; }
+    .actions-row { display: flex; gap: 8px; }
+    .actions-row button { flex: 1; margin: 0; }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>unb8 Settings 🎣</h1>
+    <h1>unb8 🎣</h1>
+
+    <div id="status"></div>
+
+    <!-- Usage (tokens + cost) — highest priority, at the top -->
+    <div class="usage-panel" id="usagePanel"
+         title="Total OpenRouter tokens used since install — across every teaser headline and article rewrite on all tabs, including automatic fallback retries when a free model is rate-limited. Free models cost nothing; paid usage shows OpenRouter's own reported charge.">
+      <div class="usage-line usage-free" id="usageFree" style="display:none;">
+        <span class="val" id="freeTokens">0</span> tokens <span class="tag">· free</span>
+      </div>
+      <div class="usage-line usage-paid" id="usagePaid" style="display:none;">
+        <span class="val" id="paidCost">$0.00</span> on paid models <span id="paidTokens"></span>
+      </div>
+      <div class="usage-empty" id="usageEmpty">No AI usage yet.</div>
+    </div>
+
+    <!-- Clean this page (universal / experimental) -->
+    <div class="clean-row">
+      <button id="cleanPage" class="secondary">🎣 Clean this page</button>
+      <span class="badge">EXPERIMENTAL</span>
+    </div>
+    <div class="consent" id="universalConsent">
+      <strong>Before cleaning any page</strong>
+      <div style="margin-top:6px;">
+        This sends the page's visible headline text — and, for same-site article links, a little of the
+        article behind each headline — to OpenRouter, a third-party AI. Don't use it on private, logged-in
+        or sensitive pages. It works best where headlines link to articles on the same site; elsewhere it
+        can only tone down the visible headline.
+      </div>
+      <div class="actions">
+        <button id="consentAccept">Accept &amp; clean</button>
+        <button id="consentCancel" class="secondary">Cancel</button>
+      </div>
+    </div>
+
+    <hr class="sep">
 
     <div class="toggle-row">
       <div class="toggle-text">
@@ -57,12 +117,6 @@
     </div>
 
     <div class="form-group">
-      <label for="apiKey">OpenRouter API Key:</label>
-      <input type="password" id="apiKey" placeholder="sk-or-...">
-      <p class="help-text">Need a key? <a href="https://openrouter.ai/workspaces/default/keys" target="_blank">Create one at OpenRouter ↗</a></p>
-    </div>
-
-    <div class="form-group">
       <label for="model">AI Model:</label>
       <select id="model">
         <option value="auto">Auto — free models with fallback (recommended)</option>
@@ -78,27 +132,24 @@
           <option value="~google/gemini-flash-latest">Gemini Flash latest (paid — newest, pricier)</option>
         </optgroup>
       </select>
-      <p class="help-text">If the chosen model fails (rate limit, downtime), unb8 automatically falls back to the free models.</p>
+      <p class="help-text">Saved instantly. If the chosen model fails (rate limit, downtime), unb8 automatically falls back to the free models.</p>
     </div>
 
-    <button id="save">Save Settings</button>
-    <button id="test" class="secondary" style="margin-top: 10px; width: 100%;">Test Connection</button>
-    <button id="clearCache" class="secondary" style="margin-top: 10px; width: 100%;">Clear Cached Headlines</button>
-
-    <div id="status"></div>
-
-    <div class="form-group" style="margin-top: 18px; border-top: 1px solid #eee; padding-top: 14px;">
-      <label style="display: flex; align-items: center; gap: 6px;">
-        Universal mode
-        <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.3px; color: #b26a00; background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; padding: 1px 5px;">EXPERIMENTAL</span>
-      </label>
-      <button id="cleanPage" class="secondary" style="margin-top: 8px; width: 100%;">Clean this page 🎣</button>
-      <p class="help-text">De-clickbaits visible headlines on the current tab — any site, one-shot (reload to undo). Sends this page's visible headline text to OpenRouter (a third-party AI); don't use on private or logged-in pages. It only de-sensationalizes headlines — it can't reveal a withheld answer the way the supported sites do.</p>
+    <div class="actions-row">
+      <button id="test" class="secondary">Test Connection</button>
+      <button id="clearCache" class="secondary">Clear Cache</button>
     </div>
 
-    <div style="margin-top: 18px; font-size: 12px; text-align: center;">
+    <hr class="sep">
+
+    <div class="form-group" style="margin-bottom: 10px;">
+      <label for="apiKey">OpenRouter API Key:</label>
+      <input type="password" id="apiKey" placeholder="sk-or-...">
+      <p class="help-text">Saved automatically. Need a key? <a href="https://openrouter.ai/workspaces/default/keys" target="_blank">Create one at OpenRouter ↗</a></p>
+    </div>
+
+    <div style="text-align: center; font-size: 12px;">
       <a href="onboarding.html" target="_blank">Open Setup Guide</a>
-      <p class="help-text" id="tokenCounter" title="Total OpenRouter tokens used since install — across every teaser headline and article rewrite on all tabs, including automatic fallback retries when a free model is rate-limited. Free models cost nothing." style="margin-top: 8px;">&nbsp;</p>
     </div>
   </div>
   <script src="popup.js"></script>
