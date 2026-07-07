@@ -6,6 +6,8 @@ CLAUDE.md
 PROJECT_STATUS.md
 FIREFOX_PORT_PLAN.md
 dr_article.html
+openrouter-documentation.txt
+openrouter-documentation-byok.md
 
 # Build artifacts — unsigned / intermediate bundles (rebuilt on demand)
 *.xpi
