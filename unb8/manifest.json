@@ -1,11 +1,13 @@
 {
   "manifest_version": 3,
   "name": "unb8",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "description": "Replaces clickbait headlines with factual ones using AI.",
   "permissions": [
     "storage",
-    "offscreen"
+    "offscreen",
+    "activeTab",
+    "scripting"
   ],
   "host_permissions": [
     "https://*.ekstrabladet.dk/*",

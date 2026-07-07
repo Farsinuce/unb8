@@ -20,6 +20,26 @@ const CACHE_PREFIX_TITLE = 'unbait_cache_v2_';
 const CACHE_PREFIX_REWRITE = 'unbait_rewrite_v1_';
 const CACHE_TTL_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
 
+// Lifetime token counter (experimental universal mode + all other model calls).
+// Deliberately NOT prefixed unbait_cache_ / unbait_rewrite_, so pruneCache and the
+// popup's Clear-Cache never touch it — it counts up forever.
+const USAGE_KEY = 'unbait_usage_v1';
+
+// Per-minute request cap for experimental universal mode (in-memory: resets if the
+// service worker sleeps — acceptable for an experiment). The free-model fallback
+// chain can make several HTTP attempts per logical request, so this is kept below
+// OpenRouter's free-tier limit with headroom for that multiplier.
+const UNIVERSAL_MAX_REQ_PER_MIN = 15;
+let rlWindowStart = 0;
+let rlCount = 0;
+function allowUniversalRequest() {
+  const now = Date.now();
+  if (now - rlWindowStart >= 60000) { rlWindowStart = now; rlCount = 0; }
+  if (rlCount >= UNIVERSAL_MAX_REQ_PER_MIN) return false;
+  rlCount++;
+  return true;
+}
+
 // Setup offscreen document for HTML parsing. The creation promise is cached so
 // concurrent callers don't race createDocument ("Only a single offscreen document
 // may be created") — awaiting it also guarantees the document's message listener
@@ -49,7 +69,62 @@ chrome.runtime.onInstalled.addListener((details) => {
     chrome.tabs.create({ url: 'onboarding.html' });
   }
   pruneCache();
+  // Stamp the token counter's "since" on first install so the popup can show it.
+  chrome.storage.local.get(USAGE_KEY, (r) => {
+    if (!r[USAGE_KEY]) {
+      chrome.storage.local.set({
+        [USAGE_KEY]: { total: 0, prompt: 0, completion: 0, calls: 0, cost: 0, since: Date.now() }
+      });
+    }
+  });
 });
+
+// --- Lifetime token counter -------------------------------------------------
+// Accumulate OpenRouter usage across every model call. Concurrent completions all
+// read-modify-write the same storage key, so serialize through a promise chain
+// (mirrors the creatingOffscreen pattern) — otherwise interleaved async writes lose
+// updates. Every field is null-guarded so a missing usage can't NaN-poison the total.
+let usageWriteChain = Promise.resolve();
+function recordUsage(usage) {
+  if (!usage) return usageWriteChain;
+  usageWriteChain = usageWriteChain.then(() => addUsage(usage)).catch((e) => {
+    console.warn('unb8: usage record failed', e);
+  });
+  return usageWriteChain;
+}
+async function addUsage(usage) {
+  const cur = (await chrome.storage.local.get(USAGE_KEY))[USAGE_KEY] || {};
+  const promptTok = usage.prompt_tokens || 0;
+  const completionTok = usage.completion_tokens || 0;
+  const totalTok = usage.total_tokens || (promptTok + completionTok);
+  await chrome.storage.local.set({
+    [USAGE_KEY]: {
+      total: (cur.total || 0) + totalTok,
+      prompt: (cur.prompt || 0) + promptTok,
+      completion: (cur.completion || 0) + completionTok,
+      calls: (cur.calls || 0) + 1,
+      cost: (cur.cost || 0) + (usage.cost || 0),
+      since: cur.since || Date.now()
+    }
+  });
+}
+
+// 1234 -> "1.2k", 1_500_000 -> "1.5M". Round the mantissa first, then promote to the
+// next unit if it rounds up to >= 1000 (so 999_500 becomes "1M", never "1000k"). Kept
+// in sync with the identical helper in popup.js (no build step to share it).
+function formatTokens(n) {
+  n = Math.max(0, Math.round(n || 0));
+  if (n < 1000) return String(n);
+  const units = [{ v: 1e3, s: 'k' }, { v: 1e6, s: 'M' }, { v: 1e9, s: 'B' }];
+  let idx = 0;
+  for (let i = 0; i < units.length; i++) {
+    if (n >= units[i].v) idx = i;
+  }
+  const mantissa = (v) => { const m = n / v; return m >= 100 ? Math.round(m) : Math.round(m * 10) / 10; };
+  let m = mantissa(units[idx].v);
+  if (m >= 1000 && idx < units.length - 1) { idx++; m = mantissa(units[idx].v); }
+  return (Number.isInteger(m) ? m : m.toFixed(1)) + units[idx].s;
+}
 
 chrome.runtime.onStartup.addListener(pruneCache);
 
@@ -106,10 +181,17 @@ const pendingRewriteRequests = new Map();
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.target === 'offscreen') return; // offscreen.js handles these
 
+  // Popup's Test Connection reports its usage here so it counts too.
+  if (request.action === 'recordUsage') {
+    recordUsage(request.usage).then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
   if (request.action === 'generateTitle') {
     let pending = pendingTitleRequests.get(request.url);
     if (!pending) {
-      pending = handleGenerateTitle(request.url, request.text).finally(() => pendingTitleRequests.delete(request.url));
+      pending = handleGenerateTitle(request.url, request.text, request.source, request.headline)
+        .finally(() => pendingTitleRequests.delete(request.url));
       pendingTitleRequests.set(request.url, pending);
     }
     pending.then(sendResponse);
@@ -128,18 +210,39 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
-async function handleGenerateTitle(url, providedText) {
+async function handleGenerateTitle(url, providedText, source, headline) {
   try {
     const settings = await chrome.storage.local.get(['extensionEnabled']);
-    if (settings.extensionEnabled === false) {
+    // Universal mode is a manual, explicit one-shot action, so it runs even when the
+    // automatic tuned-site rewriting is toggled off.
+    if (settings.extensionEnabled === false && source !== 'universal') {
       return { success: false, error: 'Extension is disabled' };
     }
 
-    // 1. Check Cache
+    // 1. Check Cache (identical keys mean an already-cleaned headline is free to reuse)
     const cacheKey = CACHE_PREFIX_TITLE + url;
     const cachedTitle = await getCached(cacheKey);
     if (cachedTitle) {
       return { success: true, title: cachedTitle.title, cached: true };
+    }
+
+    // 1b. Universal (experimental): visible-text-only, NEVER fetch. A cache miss here
+    // goes straight to the model from the page text the content side already read
+    // (fetching the synthetic 'universal://' key would hit a bogus URL). Rate-limited
+    // in-memory; a cache hit above is free and never throttled.
+    if (source === 'universal') {
+      if (!allowUniversalRequest()) {
+        return { success: false, throttled: true };
+      }
+      const prompt = buildUniversalHeadlinePrompt(headline || '', providedText || '');
+      const apiResult = await callOpenRouterWithFallback(prompt, { maxTokensFree: 1000, maxTokensPaid: 100 });
+      if (apiResult.success) {
+        const title = cleanHeadline(apiResult.content);
+        if (!title) return { success: false, error: 'Model returned an empty headline' };
+        await setCached(cacheKey, { title, ts: Date.now() });
+        return { success: true, title, model: apiResult.model };
+      }
+      return { success: false, error: apiResult.error || 'AI generation failed' };
     }
 
     // 2. Get article text: either provided by the content script (article pages,
@@ -257,6 +360,26 @@ Original headline: ${originalTitle}
 
 Article text:
 ${articleText}`;
+}
+
+// Universal mode runs on any site in any language, so — unlike buildHeadlinePrompt
+// (Danish-hardcoded) — this mirrors the source language and adds nothing not already
+// on the page (it never fetches the article).
+function buildUniversalHeadlinePrompt(headline, context) {
+  return `You rewrite clickbait headlines into factual, non-sensational ones.
+Rewrite the headline below in the SAME language as the original.
+Remove clickbait, sensationalism, curiosity gaps and teaser phrasing; state the actual point plainly.
+Use ONLY information contained in the headline and the provided context — invent nothing, add no facts.
+If the headline is already factual and non-sensational, return it essentially unchanged.
+Keep the original language's letters and diacritics exactly (do not transliterate).
+Keep it concise, ideally under 100 characters.
+ONLY output the rewritten headline, nothing else.
+
+Headline:
+${headline}
+
+Context (may be empty):
+${context}`;
 }
 
 function cleanHeadline(raw) {
@@ -448,7 +571,10 @@ async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
       // and returning empty. Ignored by non-reasoning models (e.g. Gemma).
       reasoning: reasoning,
       // Route to the highest-throughput provider available for this model (speed).
-      provider: { sort: 'throughput' }
+      provider: { sort: 'throughput' },
+      // Return token counts (and normalized cost) in the response so we can feed the
+      // lifetime usage counter. Free (:free) models report 0 cost.
+      usage: { include: true }
     };
 
     const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', 60000, {
@@ -472,6 +598,12 @@ async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
     // OpenRouter can return 200 with an error body (e.g. upstream rate limits on free models).
     if (data.error) {
       return { success: false, error: data.error.message || JSON.stringify(data.error).substring(0, 300) };
+    }
+    // Any 200 that actually ran a model burned tokens — count it, even if we go on to
+    // reject the completion (empty / truncated) and fall back. Cache hits never reach
+    // tryModel, so they can't inflate the counter. Serialized read-modify-write inside.
+    if (data.usage) {
+      await recordUsage(data.usage);
     }
     const choice = data.choices?.[0];
     const content = choice?.message?.content;

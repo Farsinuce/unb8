@@ -6,7 +6,37 @@ document.addEventListener('DOMContentLoaded', () => {
   const saveButton = document.getElementById('save');
   const testButton = document.getElementById('test');
   const clearCacheButton = document.getElementById('clearCache');
+  const cleanPageButton = document.getElementById('cleanPage');
   const statusDiv = document.getElementById('status');
+  const tokenCounter = document.getElementById('tokenCounter');
+
+  const USAGE_KEY = 'unbait_usage_v1';
+
+  // Kept in sync with the identical helper in background.js (no build step to share it).
+  // 1234 -> "1.2k", 999_500 -> "1M" (round the mantissa, then promote if it hits 1000).
+  function formatTokens(n) {
+    n = Math.max(0, Math.round(n || 0));
+    if (n < 1000) return String(n);
+    const units = [{ v: 1e3, s: 'k' }, { v: 1e6, s: 'M' }, { v: 1e9, s: 'B' }];
+    let idx = 0;
+    for (let i = 0; i < units.length; i++) {
+      if (n >= units[i].v) idx = i;
+    }
+    const mantissa = (v) => { const m = n / v; return m >= 100 ? Math.round(m) : Math.round(m * 10) / 10; };
+    let m = mantissa(units[idx].v);
+    if (m >= 1000 && idx < units.length - 1) { idx++; m = mantissa(units[idx].v); }
+    return (Number.isInteger(m) ? m : m.toFixed(1)) + units[idx].s;
+  }
+
+  function renderCounter(usage) {
+    const total = (usage && usage.total) || 0;
+    tokenCounter.textContent = total > 0 ? `${formatTokens(total)} tokens used` : ' ';
+  }
+
+  chrome.storage.local.get(USAGE_KEY, (r) => renderCounter(r[USAGE_KEY]));
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes[USAGE_KEY]) renderCounter(changes[USAGE_KEY].newValue);
+  });
 
   // Load saved settings
   chrome.storage.local.get(['openRouterApiKey', 'selectedModel', 'extensionEnabled', 'rewriteArticles'], (result) => {
@@ -82,7 +112,8 @@ document.addEventListener('DOMContentLoaded', () => {
           messages: [
             { role: 'user', content: 'Hi' }
           ],
-          max_tokens: 100
+          max_tokens: 100,
+          usage: { include: true }
         })
       });
 
@@ -93,6 +124,11 @@ document.addEventListener('DOMContentLoaded', () => {
       const data = await response.json();
       if (data.error) {
         throw new Error(data.error.message || 'API returned an error');
+      }
+
+      // Count this call's tokens too, via the background accumulator.
+      if (data.usage) {
+        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage });
       }
 
       if (data.choices && data.choices.length > 0) {
@@ -107,6 +143,28 @@ document.addEventListener('DOMContentLoaded', () => {
     } finally {
       testButton.disabled = false;
     }
+  });
+
+  // Clean this page (experimental universal mode): inject universal.js into the
+  // active tab. Opening the popup granted activeTab for that tab, so no host
+  // permission is needed. http(s) only — executeScript rejects chrome:/about:/file:.
+  cleanPageButton.addEventListener('click', () => {
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const tab = tabs && tabs[0];
+      if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) {
+        showStatus('Cannot clean this page (only http/https pages).', 'error');
+        return;
+      }
+      cleanPageButton.disabled = true;
+      chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['universal.js'] }, () => {
+        cleanPageButton.disabled = false;
+        if (chrome.runtime.lastError) {
+          showStatus(`Failed: ${chrome.runtime.lastError.message}`, 'error');
+        } else {
+          showStatus('Cleaning this page… scroll to process headlines.', 'success');
+        }
+      });
+    });
   });
 
   // Clear cached headlines/rewrites

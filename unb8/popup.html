@@ -75,8 +75,18 @@
 
     <div id="status"></div>
 
-    <div style="margin-top: 20px; font-size: 12px; text-align: center;">
+    <div class="form-group" style="margin-top: 18px; border-top: 1px solid #eee; padding-top: 14px;">
+      <label style="display: flex; align-items: center; gap: 6px;">
+        Universal mode
+        <span style="font-size: 10px; font-weight: 700; letter-spacing: 0.3px; color: #b26a00; background: #fff3e0; border: 1px solid #ffe0b2; border-radius: 4px; padding: 1px 5px;">EXPERIMENTAL</span>
+      </label>
+      <button id="cleanPage" class="secondary" style="margin-top: 8px; width: 100%;">Clean this page 🎣</button>
+      <p class="help-text">De-clickbaits visible headlines on the current tab — any site, one-shot (reload to undo). Sends this page's visible headline text to OpenRouter (a third-party AI); don't use on private or logged-in pages. It only de-sensationalizes headlines — it can't reveal a withheld answer the way the supported sites do.</p>
+    </div>
+
+    <div style="margin-top: 18px; font-size: 12px; text-align: center;">
       <a href="onboarding.html" target="_blank">Open Setup Guide</a>
+      <p class="help-text" id="tokenCounter" style="margin-top: 8px;">&nbsp;</p>
     </div>
   </div>
   <script src="popup.js"></script>

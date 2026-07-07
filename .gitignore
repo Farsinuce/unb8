@@ -1,13 +1,14 @@
 # Original extension kept locally for reference only — not part of this fork
 unbait-original/
 
-# Local dev / handover docs — kept locally, not needed by extension users
-CLAUDE.md
-PROJECT_STATUS.md
-FIREFOX_PORT_PLAN.md
+# Local dev / handover / work docs — kept locally, not needed by extension users.
+# Ignore all root-level .md/.txt work files; README.md and BUILD.md are the only
+# two users need, so keep those tracked.
+/*.md
+/*.txt
+!/README.md
+!/BUILD.md
 dr_article.html
-openrouter-documentation.txt
-openrouter-documentation-byok.md
 
 # Build artifacts — unsigned / intermediate bundles (rebuilt on demand)
 *.xpi
