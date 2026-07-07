@@ -337,7 +337,15 @@ async function callOpenRouterWithFallback(prompt, { maxTokensFree, maxTokensPaid
   let lastError = 'No models attempted';
   for (const model of chain) {
     const maxTokens = model.endsWith(':free') ? maxTokensFree : maxTokensPaid;
-    const result = await tryModel(apiKey, model, prompt, maxTokens);
+    // Prefer minimal reasoning. If the model burns its whole token budget thinking
+    // and comes back empty / length-truncated, retry it ONCE with reasoning fully
+    // off (frees the entire budget for the answer) before moving to the next model —
+    // so reasoning stays on where it works and is auto-disabled only where it breaks.
+    let result = await tryModel(apiKey, model, prompt, maxTokens, { effort: 'low' });
+    if (!result.success && result.retryReasoningOff) {
+      console.warn(`unb8: ${model} failed with reasoning (${result.error}); retrying with reasoning off`);
+      result = await tryModel(apiKey, model, prompt, maxTokens, { enabled: false });
+    }
     if (result.success) {
       return { success: true, content: result.content, model };
     }
@@ -348,7 +356,7 @@ async function callOpenRouterWithFallback(prompt, { maxTokensFree, maxTokensPaid
   return { success: false, error: lastError };
 }
 
-async function tryModel(apiKey, model, prompt, maxTokens) {
+async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
   try {
     const requestBody = {
       model: model,
@@ -358,12 +366,14 @@ async function tryModel(apiKey, model, prompt, maxTokens) {
       // Paid models stay capped to avoid "insufficient credits" pre-checks on
       // low-tier accounts; free models get headroom (they cost nothing).
       max_tokens: maxTokens,
-      // De-clickbaiting a headline or condensing an article needs no chain-of-
-      // thought. Reasoning tokens count against max_tokens, so on a reasoning model
-      // (paid Gemini, but also the free Nemotron / GPT-OSS in the fallback chain)
-      // "thinking" silently eats the whole budget and returns empty content — the
-      // main reason the free chain used to fail on all but the plain Gemma models.
-      reasoning: { enabled: false }
+      // Reasoning level is chosen by the caller ({ effort: 'low' } normally, or
+      // { enabled: false } on the retry). Reasoning tokens count against max_tokens,
+      // so keeping it minimal stops a reasoning model (paid Gemini, or the free
+      // Nemotron / GPT-OSS in the chain) from spending its whole budget thinking
+      // and returning empty. Ignored by non-reasoning models (e.g. Gemma).
+      reasoning: reasoning,
+      // Route to the highest-throughput provider available for this model (speed).
+      provider: { sort: 'throughput' }
     };
 
     const response = await fetchWithTimeout('https://openrouter.ai/api/v1/chat/completions', 60000, {
@@ -393,13 +403,14 @@ async function tryModel(apiKey, model, prompt, maxTokens) {
     if (typeof content === 'string' && content.trim()) {
       const finish = choice.finish_reason ?? choice.native_finish_reason;
       if (finish === 'length') {
-        // Hit max_tokens: output is cut off mid-text. Retryable — try the next model.
-        return { success: false, error: `Truncated completion (finish_reason=length, max_tokens=${maxTokens})` };
+        // Hit max_tokens: output cut off mid-text — often reasoning ate the budget.
+        // Retryable, and worth one more go with reasoning off (see the caller).
+        return { success: false, error: `Truncated completion (finish_reason=length, max_tokens=${maxTokens})`, retryReasoningOff: true };
       }
       return { success: true, content: content.trim() };
     }
-    // Reasoning models can burn the whole token budget thinking and return empty content.
-    return { success: false, error: 'Empty completion (model may have spent all tokens on reasoning)' };
+    // Empty content: the model likely spent its whole token budget reasoning.
+    return { success: false, error: 'Empty completion (model may have spent all tokens on reasoning)', retryReasoningOff: true };
 
   } catch (error) {
     return { success: false, error: error.name === 'AbortError' ? 'Timed out' : `Fetch error: ${error.message}` };
