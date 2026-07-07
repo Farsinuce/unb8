@@ -13,7 +13,14 @@
     "https://*.dr.dk/*"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "scripts": ["parser.js", "background.js"]
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "unb8.chill976@passmail.net",
+      "strict_min_version": "128.0"
+    }
   },
   "action": {
     "default_popup": "popup.html",

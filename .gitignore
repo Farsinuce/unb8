@@ -4,4 +4,12 @@ unbait-original/
 # Local dev / handover docs — kept locally, not needed by extension users
 CLAUDE.md
 PROJECT_STATUS.md
+FIREFOX_PORT_PLAN.md
 dr_article.html
+
+# Build artifacts — packaged/signed extension bundles, rebuilt on demand
+*.xpi
+web-ext-artifacts/
+
+# Editor / workspace files
+unbait2.code-workspace

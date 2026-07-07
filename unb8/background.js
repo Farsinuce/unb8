@@ -145,8 +145,8 @@ async function handleGenerateTitle(url, providedText) {
       }
       const html = response.body;
 
-      // 3. Parse HTML (via Offscreen)
-      const parseResult = await parseHtmlInOffscreen(html);
+      // 3. Parse HTML (inline on Firefox, via offscreen on Chrome)
+      const parseResult = await parseArticleHtml(html);
       text = parseResult.text;
 
       if (!text || text.length < 100) {
@@ -275,6 +275,16 @@ function parseRewriteOutput(raw) {
     .filter(p => p.length > 0);
   if (!title || paragraphs.length === 0) return null;
   return { title, paragraphs };
+}
+
+// Pick the parse strategy by capability. Firefox's MV3 background is an event
+// page (a DOM document) that has DOMParser, so parseHtml (from parser.js, loaded
+// via background.scripts) runs inline. Chrome's service worker has no DOMParser,
+// so it delegates to the offscreen document. chrome.offscreen is touched only on
+// the Chrome branch, so Firefox — where it's undefined — never reaches it.
+async function parseArticleHtml(html) {
+  if (typeof DOMParser !== 'undefined') return parseHtml(html); // Firefox event page
+  return parseHtmlInOffscreen(html);                            // Chrome service worker
 }
 
 async function parseHtmlInOffscreen(html) {
