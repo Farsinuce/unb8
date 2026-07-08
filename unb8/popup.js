@@ -41,9 +41,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Two independent lines: free-model tokens (which cost nothing) and paid-model spend.
-  // `cost` is OpenRouter's OWN reported charge (usage.cost, summed in background.js) — not
-  // a token×price estimate. Pre-split installs only stored `total`, so fall back to showing
-  // it as free (background.js migrates it into freeTotal on the next call).
+  // `cost` is an ESTIMATE (tokens × the model's catalogue price, summed in background.js) —
+  // OpenRouter's inline usage.cost proved unreliable (often 0), so it's shown with a ~.
+  // Pre-split installs only stored `total`, so fall back to showing it as free (background.js
+  // migrates it into freeTotal on the next call).
   function renderCounter(usage) {
     usage = usage || {};
     const freeTotal = (usage.freeTotal != null) ? usage.freeTotal : (usage.total || 0);
@@ -59,7 +60,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (hasFree) freeTokensEl.textContent = formatTokens(freeTotal);
     if (hasPaid) {
-      paidCostEl.textContent = '$' + (cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2));
+      paidCostEl.textContent = '~$' + (cost < 0.01 ? cost.toFixed(4) : cost.toFixed(2));
       paidTokensEl.textContent = paidTotal > 0 ? `(${formatTokens(paidTotal)} tokens)` : '';
     }
   }
@@ -160,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Count this call's tokens too, via the background accumulator.
       if (data.usage) {
-        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage, isFree: model.endsWith(':free') });
+        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage, isFree: model.endsWith(':free'), model: model });
       }
 
       if (data.choices && data.choices.length > 0) {

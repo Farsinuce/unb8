@@ -16,6 +16,14 @@ const FREE_MODEL_CHAIN = [
 const FREE_MODELS_CACHE_KEY = 'unbait_free_models_v1';
 const FREE_MODELS_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
 
+// Per-model price map (USD per token), cached from the same daily /models fetch as the
+// free chain. Used to ESTIMATE paid-model spend: OpenRouter's inline usage.cost is
+// unreliable for some paid providers (it frequently comes back 0, so 270k paid tokens
+// could read as "$0.0000"), so we compute cost from token counts × catalogue price
+// instead. Not prefixed unbait_cache_/rewrite_, so pruneCache leaves it alone.
+const MODEL_PRICING_CACHE_KEY = 'unbait_model_pricing_v1';
+const MODEL_PRICING_TTL_MS = 24 * 60 * 60 * 1000; // 1 day
+
 const CACHE_PREFIX_TITLE = 'unbait_cache_v2_';
 const CACHE_PREFIX_REWRITE = 'unbait_rewrite_v1_';
 const CACHE_TTL_MS = 2 * 24 * 60 * 60 * 1000; // 2 days
@@ -85,17 +93,22 @@ chrome.runtime.onInstalled.addListener((details) => {
 // (mirrors the creatingOffscreen pattern) — otherwise interleaved async writes lose
 // updates. Every field is null-guarded so a missing usage can't NaN-poison the total.
 let usageWriteChain = Promise.resolve();
-function recordUsage(usage, isFree) {
+function recordUsage(usage, isFree, model) {
   if (!usage) return usageWriteChain;
-  usageWriteChain = usageWriteChain.then(() => addUsage(usage, isFree)).catch((e) => {
-    console.warn('unb8: usage record failed', e);
-  });
+  // Look up the model price up front (async, but cached) so a first-time pricing fetch
+  // runs concurrently with any queued writes instead of stalling the chain.
+  const pricePromise = isFree ? Promise.resolve(null) : getModelPricing(model);
+  usageWriteChain = usageWriteChain
+    .then(async () => addUsage(usage, isFree, await pricePromise))
+    .catch((e) => { console.warn('unb8: usage record failed', e); });
   return usageWriteChain;
 }
-// `isFree` splits the token total into free- vs paid-model buckets so the popup can
-// show them separately (free reads as "free"; paid shows real cost). `cost` is
-// OpenRouter's own charge and is 0 for free models, so it already equals paid spend.
-async function addUsage(usage, isFree) {
+// `isFree` splits the token total into free- vs paid-model buckets so the popup can show
+// them separately. `price` is the paid model's {prompt, completion} USD-per-token rate
+// (null for free models / a lookup miss). Paid cost is ESTIMATED from tokens × price
+// because OpenRouter's inline usage.cost is unreliable (often 0); the popup shows it with
+// a leading ~ to mark it an estimate.
+async function addUsage(usage, isFree, price) {
   const cur = (await chrome.storage.local.get(USAGE_KEY))[USAGE_KEY] || {};
   const promptTok = usage.prompt_tokens || 0;
   const completionTok = usage.completion_tokens || 0;
@@ -106,13 +119,41 @@ async function addUsage(usage, isFree) {
   let curFree = cur.freeTotal, curPaid = cur.paidTotal;
   if (curFree == null && curPaid == null) { curFree = cur.total || 0; curPaid = 0; }
   else { curFree = curFree || 0; curPaid = curPaid || 0; }
+
+  // This call's paid cost, estimated from tokens × catalogue price. Free calls are $0.
+  // If the pricing lookup failed, fall back to OpenRouter's inline cost (better than 0).
+  let addCost = 0;
+  if (!isFree) {
+    if (price) addCost = promptTok * price.prompt + completionTok * price.completion;
+    else if (typeof usage.cost === 'number') addCost = usage.cost;
+  }
+
+  // One-time backfill: installs from before token-based estimation counted paid tokens
+  // but ~zero cost (they trusted OpenRouter's unreliable inline usage.cost). Estimate that
+  // history now from the paid tokens already counted × this model's price, split by the
+  // prompt:completion ratio observed overall. Only REPLACE the stored cost when it's the
+  // ~zero the old bug produced — if an install somehow already has a real accumulated cost,
+  // keep it. Best-effort, shown with ~; runs once.
+  let baseCost = cur.cost || 0;
+  let costBackfilled = cur.costBackfilled || false;
+  if (!isFree && price && !costBackfilled) {
+    if (curPaid > 0 && baseCost < 0.005) {
+      const totalSeen = (cur.total || 0) || (curFree + curPaid) || 1;
+      const pFrac = (cur.prompt || 0) / totalSeen;
+      const cFrac = (cur.completion || 0) / totalSeen;
+      baseCost = curPaid * (pFrac * price.prompt + cFrac * price.completion);
+    }
+    costBackfilled = true;
+  }
+
   await chrome.storage.local.set({
     [USAGE_KEY]: {
       total: (cur.total || 0) + totalTok,
       prompt: (cur.prompt || 0) + promptTok,
       completion: (cur.completion || 0) + completionTok,
       calls: (cur.calls || 0) + 1,
-      cost: (cur.cost || 0) + (usage.cost || 0),
+      cost: baseCost + addCost,
+      costBackfilled: costBackfilled,
       freeTotal: curFree + (isFree ? totalTok : 0),
       paidTotal: curPaid + (isFree ? 0 : totalTok),
       since: cur.since || Date.now()
@@ -194,7 +235,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
   // Popup's Test Connection reports its usage here so it counts too.
   if (request.action === 'recordUsage') {
-    recordUsage(request.usage, request.isFree).then(() => sendResponse({ ok: true }));
+    recordUsage(request.usage, request.isFree, request.model).then(() => sendResponse({ ok: true }));
     return true;
   }
 
@@ -487,7 +528,10 @@ async function getFreeModelChain() {
 
 async function refreshFreeModelChain() {
   try {
-    const live = await fetchFreeModels();                         // [{ id, context_length }, ...]
+    const catalogue = await fetchModelCatalogue();
+    // Fill the price cache from the same fetch so paid-cost estimation stays warm.
+    await setCached(MODEL_PRICING_CACHE_KEY, { ts: Date.now(), prices: buildPricingMap(catalogue) });
+    const live = filterFreeModels(catalogue);                     // [{ id, context_length }, ...]
     const liveIds = new Set(live.map(m => m.id));
     const curated = FREE_MODEL_CHAIN.filter(id => liveIds.has(id));
     const extras = live
@@ -507,13 +551,18 @@ async function refreshFreeModelChain() {
   }
 }
 
-// Fetch OpenRouter's catalogue and keep the genuinely-free text models. Free means
-// both prompt and completion cost "0"; text means it can emit text (skip image/audio).
-async function fetchFreeModels() {
+// Fetch OpenRouter's full model catalogue (public, CORS-open, no key or host permission).
+async function fetchModelCatalogue() {
   const res = await fetchWithTimeout('https://openrouter.ai/api/v1/models', 15000);
   if (!res.ok) throw new Error(`models list HTTP ${res.status}`);
   const list = JSON.parse(res.body).data;
   if (!Array.isArray(list)) throw new Error('unexpected /models payload');
+  return list;
+}
+
+// Keep the genuinely-free text models. Free means both prompt and completion cost "0";
+// text means it can emit text (skip image/audio).
+function filterFreeModels(list) {
   return list.filter(m => {
     if (typeof m.id !== 'string' || !m.id.endsWith(':free')) return false;
     const p = m.pricing || {};
@@ -524,6 +573,49 @@ async function fetchFreeModels() {
     if (out && !out.some(x => String(x).includes('text'))) return false;
     return true;
   });
+}
+
+// Build a { modelId: { prompt, completion } } USD-per-token map from the catalogue, for
+// estimating paid spend. Pricing fields arrive as strings; keep only finite numbers.
+function buildPricingMap(list) {
+  const prices = {};
+  for (const m of list) {
+    if (typeof m.id !== 'string' || !m.pricing) continue;
+    const prompt = Number(m.pricing.prompt);
+    const completion = Number(m.pricing.completion);
+    if (Number.isFinite(prompt) && Number.isFinite(completion)) {
+      prices[m.id] = { prompt, completion };
+    }
+  }
+  return prices;
+}
+
+// Look up one model's price for paid-cost estimation. Served from the daily cache (filled
+// alongside the free chain in refreshFreeModelChain), so the common path never fetches;
+// only a cold-cache miss (e.g. first run right after this update) triggers a live fetch.
+let pricingPromise = null;
+async function getModelPricing(modelId) {
+  if (!modelId) return null;
+  try {
+    const cached = (await chrome.storage.local.get(MODEL_PRICING_CACHE_KEY))[MODEL_PRICING_CACHE_KEY];
+    if (cached && cached.ts && (Date.now() - cached.ts) < MODEL_PRICING_TTL_MS && cached.prices) {
+      return cached.prices[modelId] || null;
+    }
+  } catch (e) { /* fall through to a live refresh */ }
+  if (!pricingPromise) {
+    pricingPromise = (async () => {
+      try {
+        const prices = buildPricingMap(await fetchModelCatalogue());
+        await setCached(MODEL_PRICING_CACHE_KEY, { ts: Date.now(), prices });
+        return prices;
+      } catch (e) {
+        console.warn('unb8: model-pricing fetch failed —', e.message);
+        return null;
+      }
+    })().finally(() => { pricingPromise = null; });
+  }
+  const prices = await pricingPromise;
+  return (prices && prices[modelId]) || null;
 }
 
 // Try the selected model first (or the whole free chain when set to 'auto'),
@@ -612,9 +704,11 @@ async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
     }
     // Any 200 that actually ran a model burned tokens — count it, even if we go on to
     // reject the completion (empty / truncated) and fall back. Cache hits never reach
-    // tryModel, so they can't inflate the counter. Serialized read-modify-write inside.
+    // tryModel, so they can't inflate the counter. Fire-and-forget: the usage write (and,
+    // on a cold pricing cache, its /models fetch) must NOT gate the headline response —
+    // recordUsage serializes the write internally and swallows its own errors.
     if (data.usage) {
-      await recordUsage(data.usage, model.endsWith(':free'));
+      recordUsage(data.usage, model.endsWith(':free'), model);
     }
     const choice = data.choices?.[0];
     const content = choice?.message?.content;
