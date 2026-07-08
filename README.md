@@ -5,14 +5,11 @@
 ## Features
 *   **AI-Powered:** Reads the article content in the background and generates a non-clickbait title.
 *   **Free by default:** Uses free OpenRouter models (Gemma 4, Nemotron 3, GPT-OSS) with automatic fallback — if one model is rate-limited or down, the next one is tried.
-*   **On/off toggles:** The popup has switches to disable the whole extension or enable **article-page rewriting**, which condenses the full article text and removes filler — including the inline "Kort nyt" short-news items on dr.dk (off by default).
-*   **Token-saving by default:** Headlines are rewritten as you scroll to them, not the whole page at once — so teasers you never reach cost nothing (toggle off to process everything on load).
-*   **Privacy Focused:** You bring your own API key. Your data goes directly from your browser to the AI provider (OpenRouter).
+*   **Token-saving by default:** Headlines are rewritten as you scroll to them, not the whole page at once (toggle off to process everything on load).
+*   **Local Caching:** Remembers your generated titles for 2 days.
+*   **Your data:** You bring your own API key. The site data data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
-*   **Local Caching:** Remembers generated titles for 2 days to minimize API usage.
-*   **Usage meter:** The popup shows tokens used on free models (which read as "free") and, separately, the real OpenRouter cost once you use a paid model.
-*   **Clean this page (experimental):** A popup button that de-clickbaits headlines on *any* site — for same-site article links it reads a little of the article behind the headline for a proper rewrite. A floating on-page control shows progress with a Stop button.
-
+*   **Clean this page (experimental):** De-clickbaits headlines on any site — works *sometimes*.
 
 ## Installation
 
