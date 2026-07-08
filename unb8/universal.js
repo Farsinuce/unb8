@@ -65,7 +65,7 @@
   let io = null;
   let mo = null;
   let scanTimer = null;
-  const applied = new Map();        // element -> { target, originalHTML, aiTitle, showingAi }
+  const applied = new Map();        // element -> { target, originalHTML, aiHTML, aiTitle, showingAi }
   const ctxCache = new Map();       // element -> request context string (avoids re-fetch on throttle-retry)
   const observedEls = new Set();    // elements currently watched (unique — bounds the cap correctly)
 
@@ -79,13 +79,20 @@
   function isCandidate(el) {
     if (el.dataset.unbaitSkip === '1' || el.dataset.unbaitUniversal === '1' || observedEls.has(el)) return false;
 
-    // Cheap checks first (no layout).
-    const tag = el.tagName;
-    const isHeading = tag === 'H1' || tag === 'H2' || tag === 'H3';
-    if (!isHeading && tag !== 'A') { el.dataset.unbaitSkip = '1'; return false; }
-
+    // Cheap textual checks first (no layout). collectCandidates() has already
+    // narrowed the element TYPES (headings, headline links, title-classed or bold
+    // card text), so here we only gate on the text and visibility every strategy
+    // shares — no tag check needed.
     const txt = cleanText(el.textContent);
     if (txt.length < MIN_LEN || txt.length > MAX_LEN || !txt.includes(' ')) {
+      el.dataset.unbaitSkip = '1';
+      return false;
+    }
+    // Reject short ALL-CAPS kickers/labels ("SENESTE NYT", "BREAKING") — section
+    // tags, not headlines. Bounded to <40 chars so a genuinely short all-caps
+    // headline stays possible; requires a real (incl. Danish æ/ø/å) letter so
+    // pure numbers/symbols aren't caught.
+    if (txt.length < 40 && txt === txt.toUpperCase() && /[A-ZÆØÅ]/.test(txt)) {
       el.dataset.unbaitSkip = '1';
       return false;
     }
@@ -102,16 +109,84 @@
     return true;
   }
 
-  // Collect headings (h1–h3) plus standalone headline links, avoiding heading/link
-  // nesting overlap so one visual headline isn't queued twice.
+  // Read an element's class as a lowercase string. Guards against SVG elements,
+  // whose `className` is an SVGAnimatedString rather than a plain string.
+  const classNameOf = (el) => (el.getAttribute('class') || '').toLowerCase();
+
+  const HEADING_SEL = 'h1, h2, h3, h4';
+  const TITLE_SEL = '[class*="title" i], [class*="headline" i], [class*="heading" i]';
+  // Card/teaser wrappers on modern JS news sites. Case-insensitive so CSS-module
+  // names (`Teaser_root__ab12`) match too.
+  const CARD_SEL = '[class*="card" i], [class*="teaser" i], [class*="story" i], ' +
+                   '[class*="article" i], [class*="post" i]';
+  // Class substrings that mark a title-ish element as NOT the headline (deks,
+  // kickers, section/category labels, bylines).
+  const NON_HEADLINE_CLASS = /sub|kicker|section|category|label|meta|byline|author|logo|tag|breadcrumb/;
+
+  // Within a card wrapper, the single boldest text leaf — for utility-class
+  // (Tailwind-style) sites whose headline is a bare bold <div>/<span> with no
+  // heading, link, or title-ish class. Leaf-only and capped to bound the cost of
+  // the computed-style reads; class/tag bold hints avoid the read entirely.
+  function boldestLeaf(card) {
+    let best = null, bestScore = 0, checked = 0;
+    for (const n of card.querySelectorAll('div, span, p, strong, b')) {
+      if (checked >= 30) break;                 // bound work per card
+      if (n.children.length > 0) continue;      // leaves only (cheap, no layout)
+      const txt = cleanText(n.textContent);
+      if (txt.length < MIN_LEN || txt.length > MAX_LEN || !txt.includes(' ')) continue;
+      checked++;
+      const cls = classNameOf(n);
+      let score;
+      if (n.tagName === 'STRONG' || n.tagName === 'B' ||
+          /font-bold|font-semibold|fw-bold|text-bold|\bbold\b/.test(cls)) {
+        score = 700;                            // class/tag hint — no reflow needed
+      } else {
+        score = parseInt(window.getComputedStyle(n).fontWeight, 10) || 0;
+      }
+      if (score >= 600 && score > bestScore) { best = n; bestScore = score; }
+    }
+    return best;
+  }
+
+  // Collect visible-headline candidates via several selector-free strategies so
+  // universal mode also reaches modern React/Next teaser cards (where the headline
+  // is a styled <div>/<span>, not a semantic heading or bare link). Each headline
+  // is queued once: more specific candidates (headings, links) win, and broader
+  // strategies skip anything already covered by a nested/ancestor candidate.
   function collectCandidates() {
     const out = [];
-    document.querySelectorAll('h1, h2, h3').forEach(h => out.push(h));
+    const seen = new Set();
+    const push = (el) => { if (el && !seen.has(el)) { seen.add(el); out.push(el); } };
+
+    // 1. Semantic headings.
+    document.querySelectorAll(HEADING_SEL).forEach(push);
+
+    // 2. Standalone headline links whose text isn't already owned by a heading.
     document.querySelectorAll('a').forEach(a => {
-      if (a.querySelector('h1, h2, h3')) return; // the inner heading is the candidate
-      if (a.closest('h1, h2, h3')) return;       // inside a heading — heading is the candidate
-      out.push(a);
+      if (a.querySelector(HEADING_SEL)) return; // the inner heading is the candidate
+      if (a.closest(HEADING_SEL)) return;       // inside a heading — heading is the candidate
+      push(a);
     });
+
+    // 3. Non-semantic headline containers: elements whose class hints "title"/
+    //    "headline" (but not a sub-title/kicker), when no heading or link already
+    //    covers the text. Prefer the innermost such element. Cheap — class match,
+    //    no layout read.
+    document.querySelectorAll(TITLE_SEL).forEach(el => {
+      if (NON_HEADLINE_CLASS.test(classNameOf(el))) return;
+      if (el.querySelector(HEADING_SEL + ', a')) return; // a more specific candidate is inside
+      if (el.closest(HEADING_SEL + ', a')) return;       // already covered by strategy 1/2
+      if (el.querySelector(TITLE_SEL)) return;           // a nested title element wins
+      push(el);
+    });
+
+    // 4. Utility-class (Tailwind) cards with no heading/link/title-class headline:
+    //    fall back to the boldest text leaf in the card.
+    document.querySelectorAll(CARD_SEL).forEach(card => {
+      if (card.querySelector(HEADING_SEL + ', a, ' + TITLE_SEL)) return;
+      push(boldestLeaf(card));
+    });
+
     return out;
   }
 
@@ -234,31 +309,68 @@
     return btn;
   }
 
+  // Write the new headline while PRESERVING non-text children (thumbnails, live/
+  // timestamp badges, icons) instead of nuking the whole subtree. Drills to the
+  // element that actually owns the headline text and rewrites only its text nodes.
+  function replaceHeadlineText(node, newTitle) {
+    const fullLen = cleanText(node.textContent).length;
+    const directText = Array.from(node.childNodes)
+      .filter(n => n.nodeType === Node.TEXT_NODE && n.nodeValue.trim().length > 0);
+    const directLen = directText.reduce((s, n) => s + n.nodeValue.trim().length, 0);
+
+    // No element children — plain text host, replace it outright.
+    if (node.children.length === 0) { node.textContent = newTitle; return; }
+
+    // This node's own direct text carries (almost) the whole headline; the element
+    // children are non-text extras (img/badge) — replace the text, keep them.
+    if (directText.length > 0 && directLen >= fullLen - 2) {
+      directText[0].nodeValue = newTitle;
+      for (let i = 1; i < directText.length; i++) directText[i].nodeValue = '';
+      return;
+    }
+
+    // Headline text lives in a dominant child element — recurse into it, leaving
+    // its siblings (timestamps, kickers, images) alone.
+    let richest = null, richestLen = 0;
+    for (const c of node.children) {
+      const l = cleanText(c.textContent).length;
+      if (l > richestLen) { richestLen = l; richest = c; }
+    }
+    if (richest && richestLen >= fullLen * 0.6) { replaceHeadlineText(richest, newTitle); return; }
+
+    // Ambiguous split — rewrite the longest direct text node (or the richest child)
+    // rather than wiping the whole subtree.
+    if (directText.length > 0) {
+      let longest = directText[0];
+      for (const n of directText) if (n.nodeValue.trim().length > longest.nodeValue.trim().length) longest = n;
+      longest.nodeValue = newTitle;
+    } else if (richest) {
+      replaceHeadlineText(richest, newTitle);
+    } else {
+      node.textContent = newTitle;
+    }
+  }
+
   function applyTitle(el, newTitle) {
     const target = textTarget(el);
     const originalHTML = target.innerHTML;
-    const state = { target, originalHTML, aiTitle: newTitle, showingAi: true };
+    replaceHeadlineText(target, newTitle);
+    const aiHTML = target.innerHTML;               // AI-state snapshot (before the button)
+    const state = { target, originalHTML, aiHTML, aiTitle: newTitle, showingAi: true };
     applied.set(el, state);
 
-    target.textContent = newTitle;
-
+    // Toggle swaps the whole subtree between the original and AI snapshots, so both
+    // states keep their images/badges; the button is re-appended after each swap
+    // (an innerHTML restore removes it) — it lives in this closure, not the snapshots.
     const btn = makeToggle();
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      if (state.showingAi) {
-        state.target.innerHTML = state.originalHTML;
-        state.showingAi = false;
-        btn.style.filter = 'grayscale(100%)';
-        btn.style.opacity = '0.5';
-        state.target.appendChild(btn); // innerHTML restore wiped it — re-attach
-      } else {
-        state.target.textContent = state.aiTitle;
-        state.showingAi = true;
-        btn.style.filter = 'none';
-        btn.style.opacity = '1';
-        state.target.appendChild(btn);
-      }
+      state.showingAi = !state.showingAi;
+      state.target.innerHTML = state.showingAi ? state.aiHTML : state.originalHTML;
+      btn.style.filter = state.showingAi ? 'none' : 'grayscale(100%)';
+      btn.style.opacity = state.showingAi ? '1' : '0.5';
+      state.target.appendChild(btn);
     });
     target.appendChild(btn);
     updateWidget();
