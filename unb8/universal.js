@@ -60,7 +60,7 @@
   let inFlight = 0;                 // requests currently fetching/awaiting a model response
   let stopped = false;             // no new dispatches (cap reached OR user stop)
   let aborted = false;             // user pressed Stop — also drop in-flight results
-  let finalReason = null;          // 'stopped' | 'done' once finalized (drives widget text)
+  let finalReason = null;          // 'stopped' | 'done' | 'error' once finalized (drives widget text)
   let observedCapped = false;
   let io = null;
   let mo = null;
@@ -78,6 +78,12 @@
 
   function isCandidate(el) {
     if (el.dataset.unbaitSkip === '1' || el.dataset.unbaitUniversal === '1' || observedEls.has(el)) return false;
+
+    // On the tuned sites (dr.dk/eb.dk/bt.dk) content.js already de-clickbaits these
+    // elements — re-sending them would waste LLM calls on already-clean headlines and
+    // leave two toggle systems fighting over the same markup. Not memoized via
+    // unbaitSkip: ownership is transient (cleared when the user disables the extension).
+    if (el.closest('[data-unbait-processed], [data-unbait-inline]')) return false;
 
     // Cheap textual checks first (no layout). collectCandidates() has already
     // narrowed the element TYPES (headings, headline links, title-classed or bold
@@ -291,6 +297,8 @@
     btn.className = 'unbait-toggle';
     btn.textContent = '🎣';
     btn.title = 'Toggle original headline (unb8)';
+    btn.setAttribute('aria-label', 'Toggle original headline');
+    btn.setAttribute('aria-pressed', 'true'); // created only when the AI headline is shown
     Object.assign(btn.style, {
       zIndex: '2147483647',
       background: 'white',
@@ -338,12 +346,24 @@
     }
     if (richest && richestLen >= fullLen * 0.6) { replaceHeadlineText(richest, newTitle); return; }
 
-    // Ambiguous split — rewrite the longest direct text node (or the richest child)
-    // rather than wiping the whole subtree.
+    // Ambiguous split — the headline is spread across direct text nodes and inline
+    // elements (e.g. "Han <em>nægter</em> at svare…"). Write into the longest text
+    // node, blank the other text nodes (bare sibling text is always headline, never a
+    // badge), and clear pure inline-FORMATTING children — grammatical parts of the
+    // sentence — while leaving span/time/a/media children (LIVE badges, timestamps)
+    // alone. Without the blanking the page would show old and new text concatenated.
     if (directText.length > 0) {
       let longest = directText[0];
       for (const n of directText) if (n.nodeValue.trim().length > longest.nodeValue.trim().length) longest = n;
       longest.nodeValue = newTitle;
+      for (const n of directText) if (n !== longest) n.nodeValue = '';
+      // No SMALL here — <small> inside a heading is conventionally metadata (a
+      // timestamp/byline), not part of the sentence. Leaf-only (children.length
+      // check) so a badge nested INSIDE a formatting tag survives too.
+      const FORMATTING_TAGS = /^(EM|STRONG|B|I|U|MARK|SUB|SUP)$/;
+      for (const c of node.children) {
+        if (FORMATTING_TAGS.test(c.tagName) && c.children.length === 0) c.textContent = '';
+      }
     } else if (richest) {
       replaceHeadlineText(richest, newTitle);
     } else {
@@ -370,6 +390,7 @@
       state.target.innerHTML = state.showingAi ? state.aiHTML : state.originalHTML;
       btn.style.filter = state.showingAi ? 'none' : 'grayscale(100%)';
       btn.style.opacity = state.showingAi ? '1' : '0.5';
+      btn.setAttribute('aria-pressed', String(state.showingAi));
       state.target.appendChild(btn);
     });
     target.appendChild(btn);
@@ -421,7 +442,9 @@
   function updateWidget() {
     if (!widgetCountEl) return;
     const done = applied.size;
-    if (finalReason) {
+    if (finalReason === 'error') {
+      widgetCountEl.textContent = 'Check your OpenRouter API key in the unb8 popup.';
+    } else if (finalReason) {
       const verb = finalReason === 'stopped' ? 'Stopped' : 'Done';
       widgetCountEl.textContent = `${verb} — ${done} headline${done === 1 ? '' : 's'} cleaned.`;
     } else {
@@ -437,7 +460,8 @@
     if (io) io.disconnect();
     if (mo) mo.disconnect();
     if (widgetTitleEl) {
-      widgetTitleEl.innerHTML = reason === 'stopped' ? '🎣 <b>unb8</b> · stopped' : '🎣 <b>unb8</b> · done';
+      const label = reason === 'stopped' ? 'stopped' : (reason === 'error' ? 'failed' : 'done');
+      widgetTitleEl.innerHTML = `🎣 <b>unb8</b> · ${label}`;
     }
     updateWidget();
     if (widgetBtn) {
@@ -494,20 +518,25 @@
           if (chrome.runtime.lastError) {
             console.log('unb8: universal message failed', chrome.runtime.lastError.message);
             updateWidget();
+            finishIfCapReached();
             return;
           }
           if (response && response.throttled) {
             // The worker's per-minute cap kicked in — this didn't cost an LLM call.
-            // Give the slot back and retry the element shortly (bounded, only while
-            // running). The fetched context is memoized, so no re-fetch on retry.
+            // Give the slot back and unclaim (so even a give-up stays re-claimable by
+            // a later "Clean this page" click), then retry once the rate window has
+            // reopened — the worker says how long that is (retryAfterMs); jitter
+            // staggers the burst of throttled elements so they don't all slam the
+            // fresh window in the same tick. Context is memoized, so no re-fetch.
             dispatched = Math.max(0, dispatched - 1);
+            delete el.dataset.unbaitUniversal;
             const n = (retries || 0) + 1;
             if (n <= MAX_THROTTLE_RETRIES && !stopped) {
-              delete el.dataset.unbaitUniversal;
-              setTimeout(() => process(el, n), 4000 + n * 1000);
+              const delay = (response.retryAfterMs || 20000 * n) + Math.random() * 3000;
+              setTimeout(() => process(el, n), delay);
             }
             updateWidget();
-            return;
+            return; // slot refunded — the cap can't be the reason to finalize here
           }
           if (response && response.success && response.title) {
             if (cleanText(response.title) !== cleanText(el.textContent)) {
@@ -516,9 +545,18 @@
               updateWidget();
             }
           } else {
-            if (response && response.error) console.log('unb8: universal title failed —', response.error);
+            if (response && response.error) {
+              console.log('unb8: universal title failed —', response.error);
+              // A missing/invalid key is deterministic — every further call would fail
+              // the same way, so surface it on the widget instead of spinning forever.
+              if (/no api key|401|unauthorized|invalid.*key/i.test(response.error)) {
+                finalize('error');
+                return;
+              }
+            }
             updateWidget();
           }
+          finishIfCapReached();
         }
       );
     } catch (e) {
@@ -527,6 +565,7 @@
       // release the in-flight slot here instead of leaking it.
       inFlight = Math.max(0, inFlight - 1);
       updateWidget();
+      finishIfCapReached();
       return;
     }
     finishIfCapReached(); // a throttle-retry can push dispatched to the cap outside an IO batch
@@ -548,6 +587,15 @@
 
   function observe(el) {
     if (stopped || observedEls.has(el)) return;
+    observedEls.add(el);
+    io.observe(el);
+  }
+
+  function scan() {
+    if (stopped) return;
+    // observedEls is add-only within a run, so once the watch cap is hit no scan can
+    // ever observe anything again — bail before the four full-document
+    // querySelectorAll passes in collectCandidates(), not after them.
     if (observedEls.size >= MAX_OBSERVED) {
       if (!observedCapped) {
         observedCapped = true;
@@ -555,20 +603,18 @@
       }
       return;
     }
-    observedEls.add(el);
-    io.observe(el);
-  }
-
-  function scan() {
-    if (stopped) return;
     for (const el of collectCandidates()) {
       if (observedEls.size >= MAX_OBSERVED) break;
       if (isCandidate(el)) observe(el);
     }
   }
 
+  // Finalize only at quiescence: `dispatched` counts requests that may yet be refunded
+  // (throttled) — latching 'Done' while responses are in flight would strand those
+  // refunded slots (worst case: 30 visible candidates finalized "Done — 0 cleaned"
+  // before a single response landed). Called wherever inFlight can reach 0.
   function finishIfCapReached() {
-    if (dispatched >= MAX_PER_PAGE && !stopped) {
+    if (dispatched >= MAX_PER_PAGE && inFlight === 0 && !stopped) {
       finalize('done');
       console.log(`unb8: universal per-page cap (${MAX_PER_PAGE}) reached — stopping new headlines`);
     }
@@ -601,6 +647,13 @@
     inFlight = 0;
     observedCapped = false;
     observedEls.clear();
+    // Un-claim elements the PREVIOUS run dispatched but never resolved (its callbacks
+    // bail on the generation check): without this they'd stay claimed forever and a
+    // re-click could show "0 cleaned" for the whole initial viewport. Re-dispatching
+    // is nearly free — the background dedupes per key and the 2-day cache is warm.
+    document.querySelectorAll('[data-unbait-universal="1"]').forEach((el) => {
+      if (!applied.has(el)) delete el.dataset.unbaitUniversal;
+    });
     removeWidget();   // drop any finalized ("Done/Stopped") widget so we show a fresh running one
     ensureWidget();
     buildObserver();

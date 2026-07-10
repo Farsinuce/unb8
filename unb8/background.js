@@ -85,6 +85,33 @@ chrome.runtime.onInstalled.addListener((details) => {
       });
     }
   });
+  // One-time migration: v1.2.6 shipped the "newest Gemini Flash" picker option with
+  // OpenRouter's catalogue alias id ('~'-prefixed), which 404s at the completions
+  // endpoint. v1.2.7 fixed the option value but not already-saved settings — every
+  // request for those users still burns a doomed attempt before falling back.
+  chrome.storage.local.get('selectedModel', (r) => {
+    if (r.selectedModel === '~google/gemini-flash-latest') {
+      chrome.storage.local.set({ selectedModel: 'google/gemini-flash-latest' });
+    }
+  });
+});
+
+// --- Missing-key toolbar badge -----------------------------------------------
+// Without a key the extension fails silently (every request errors, content.js only
+// console.logs), so surface the one mandatory setup step on the toolbar icon itself.
+// Top-level call runs on every worker/event-page start-up; the storage listener keeps
+// it live while the popup edits the key (saved per keystroke).
+function updateKeyBadge() {
+  chrome.storage.local.get('openRouterApiKey', (r) => {
+    const hasKey = !!(r.openRouterApiKey && String(r.openRouterApiKey).trim());
+    chrome.action.setBadgeText({ text: hasKey ? '' : '!' });
+    chrome.action.setTitle({ title: hasKey ? 'unb8 Settings' : 'unb8 — add your OpenRouter API key to activate' });
+    if (!hasKey) chrome.action.setBadgeBackgroundColor({ color: '#d93025' });
+  });
+}
+updateKeyBadge();
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.openRouterApiKey) updateKeyBadge();
 });
 
 // --- Lifetime token counter -------------------------------------------------
@@ -161,23 +188,6 @@ async function addUsage(usage, isFree, price) {
   });
 }
 
-// 1234 -> "1.2k", 1_500_000 -> "1.5M". Round the mantissa first, then promote to the
-// next unit if it rounds up to >= 1000 (so 999_500 becomes "1M", never "1000k"). Kept
-// in sync with the identical helper in popup.js (no build step to share it).
-function formatTokens(n) {
-  n = Math.max(0, Math.round(n || 0));
-  if (n < 1000) return String(n);
-  const units = [{ v: 1e3, s: 'k' }, { v: 1e6, s: 'M' }, { v: 1e9, s: 'B' }];
-  let idx = 0;
-  for (let i = 0; i < units.length; i++) {
-    if (n >= units[i].v) idx = i;
-  }
-  const mantissa = (v) => { const m = n / v; return m >= 100 ? Math.round(m) : Math.round(m * 10) / 10; };
-  let m = mantissa(units[idx].v);
-  if (m >= 1000 && idx < units.length - 1) { idx++; m = mantissa(units[idx].v); }
-  return (Number.isInteger(m) ? m : m.toFixed(1)) + units[idx].s;
-}
-
 chrome.runtime.onStartup.addListener(pruneCache);
 
 // Drop cache entries older than the TTL, plus entries from the old (pre-v2) format.
@@ -233,9 +243,13 @@ const pendingRewriteRequests = new Map();
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.target === 'offscreen') return; // offscreen.js handles these
 
-  // Popup's Test Connection reports its usage here so it counts too.
-  if (request.action === 'recordUsage') {
-    recordUsage(request.usage, request.isFree, request.model).then(() => sendResponse({ ok: true }));
+  // Popup's Test Connection: run a tiny prompt through the SAME chain real requests
+  // use (selected model first, live free chain, reasoning-off retry), so the result
+  // reflects what headline generation will actually do — a hardcoded test model would
+  // report failure whenever that one model is rotated out or rate-limited even though
+  // the extension still works. Usage is recorded by tryModel as usual.
+  if (request.action === 'testConnection') {
+    handleTestConnection().then(sendResponse);
     return true;
   }
 
@@ -262,6 +276,37 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 });
 
+// Test the user's setup end-to-end. A cheap GET /key first (free, immune to model
+// rate limits) so a bad key is reported crisply; then a minimal completion through
+// callOpenRouterWithFallback so the verdict matches real headline generation.
+async function handleTestConnection() {
+  const { openRouterApiKey } = await chrome.storage.local.get('openRouterApiKey');
+  if (!openRouterApiKey) {
+    return { success: false, error: 'No API key configured' };
+  }
+  // keyValid is only claimed when the probe actually CONFIRMED the key (2xx) — a
+  // timed-out/5xx probe must not later mislabel a fatal 401 as "key is valid".
+  let keyConfirmed = false;
+  try {
+    const keyRes = await fetchWithTimeout('https://openrouter.ai/api/v1/key', 15000, {
+      headers: { 'Authorization': `Bearer ${openRouterApiKey}` }
+    });
+    if (keyRes.status === 401 || keyRes.status === 403) {
+      return { success: false, error: 'Invalid API key' };
+    }
+    keyConfirmed = keyRes.ok;
+  } catch (e) { /* network hiccup — let the completion test below surface it */ }
+  const result = await callOpenRouterWithFallback('Reply with the single word: OK', { maxTokensFree: 500, maxTokensPaid: 50 });
+  if (result.success) {
+    return { success: true, model: result.model };
+  }
+  const authFailed = /HTTP 401/.test(result.error || '');
+  if (authFailed) {
+    return { success: false, error: 'Invalid API key' };
+  }
+  return { success: false, keyValid: keyConfirmed, error: result.error };
+}
+
 async function handleGenerateTitle(url, providedText, source, headline) {
   try {
     const settings = await chrome.storage.local.get(['extensionEnabled']);
@@ -284,7 +329,9 @@ async function handleGenerateTitle(url, providedText, source, headline) {
     // in-memory; a cache hit above is free and never throttled.
     if (source === 'universal') {
       if (!allowUniversalRequest()) {
-        return { success: false, throttled: true };
+        // Tell the page how long the closed rate window has left, so its retry can
+        // be scheduled AFTER the window reopens instead of burning retries inside it.
+        return { success: false, throttled: true, retryAfterMs: Math.max(1000, 60000 - (Date.now() - rlWindowStart)) };
       }
       const prompt = buildUniversalHeadlinePrompt(headline || '', providedText || '');
       const apiResult = await callOpenRouterWithFallback(prompt, { maxTokensFree: 1000, maxTokensPaid: 100 });
@@ -599,7 +646,10 @@ async function getModelPricing(modelId) {
   try {
     const cached = (await chrome.storage.local.get(MODEL_PRICING_CACHE_KEY))[MODEL_PRICING_CACHE_KEY];
     if (cached && cached.ts && (Date.now() - cached.ts) < MODEL_PRICING_TTL_MS && cached.prices) {
-      return cached.prices[modelId] || null;
+      // '~' fallback: OpenRouter lists auto-alias models (e.g. gemini-flash-latest)
+      // under a '~'-prefixed catalogue id, while the completions endpoint takes the
+      // bare id — without this, paid spend on such a model would show as ~$0.
+      return cached.prices[modelId] || cached.prices['~' + modelId] || null;
     }
   } catch (e) { /* fall through to a live refresh */ }
   if (!pricingPromise) {
@@ -615,7 +665,7 @@ async function getModelPricing(modelId) {
     })().finally(() => { pricingPromise = null; });
   }
   const prices = await pricingPromise;
-  return (prices && prices[modelId]) || null;
+  return (prices && (prices[modelId] || prices['~' + modelId])) || null;
 }
 
 // Try the selected model first (or the whole free chain when set to 'auto'),
@@ -708,7 +758,9 @@ async function tryModel(apiKey, model, prompt, maxTokens, reasoning) {
     // on a cold pricing cache, its /models fetch) must NOT gate the headline response —
     // recordUsage serializes the write internally and swallows its own errors.
     if (data.usage) {
-      recordUsage(data.usage, model.endsWith(':free'), model);
+      // Prefer the response's resolved concrete model id for the pricing lookup —
+      // for alias requests (gemini-flash-latest) the routed slug carries the real price.
+      recordUsage(data.usage, model.endsWith(':free'), data.model || model);
     }
     const choice = data.choices?.[0];
     const content = choice?.message?.content;

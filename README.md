@@ -7,7 +7,7 @@
 *   **Free by default:** Uses free OpenRouter models (Gemma 4, Nemotron 3, GPT-OSS) with automatic fallback — if one model is rate-limited or down, the next one is tried.
 *   **Token-saving by default:** Headlines are rewritten as you scroll to them, not the whole page at once (toggle off to process everything on load).
 *   **Local Caching:** Remembers your generated titles for 2 days.
-*   **Your data:** You bring your own API key. The site data data goes directly from your browser to the AI provider (OpenRouter).
+*   **Your data:** You bring your own API key. The site data goes directly from your browser to the AI provider (OpenRouter).
 *   **Toggle per headline:** Click the 🎣 icon to switch between the original clickbait and the factual headline (or the original/rewritten article).
 *   **Clean this page (experimental):** De-clickbaits headlines on any site — works *sometimes*.
 

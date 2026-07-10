@@ -219,9 +219,27 @@ function stop() {
 function scanPage() {
   if (!settings.enabled) return;
   pruneObservedNodes(); // release observations for nodes the page has since removed
+  pruneInlineState();   // release inline items the (virtualized) page has since removed
   processArticles();
   processInlineArticles();
   processArticlePage();
+}
+
+// dr.dk virtualizes its timelines, so applied "Kort nyt" items scroll out of the DOM
+// but would stay pinned in inlineState (detached subtree + body-HTML snapshot) for the
+// page's lifetime. Restore + un-claim each detached item before dropping it, so if the
+// site ever re-inserts the same node it is re-scanned as a clean, unclaimed item.
+// (Map.delete during forEach is safe.)
+function pruneInlineState() {
+  inlineState.forEach((state, article) => {
+    if (article.isConnected) return;
+    state.titleEl.innerText = state.originalTitle;
+    if (state.originalBodyHTML !== null) state.body.innerHTML = state.originalBodyHTML;
+    article.querySelector('.unbait-toggle')?.remove();
+    delete article.dataset.unbaitInline;
+    delete article.dataset.unbaitProcessed;
+    inlineState.delete(article);
+  });
 }
 
 // Stable 36-radix hash for synthetic cache keys (inline "Kort nyt" items have no URL).
@@ -807,7 +825,11 @@ function createToggleButton() {
   const btn = document.createElement('button');
   btn.className = 'unbait-toggle';
   btn.innerHTML = '🎣'; // unb8 brand mark
-  btn.title = 'Toggle original headline';
+  // Danish tooltip/name (these sites' audience reads Danish); aria-pressed carries
+  // the AI-vs-original state for screen readers (opacity/grayscale alone is invisible).
+  btn.title = 'Skift mellem AI-overskrift og original (unb8)';
+  btn.setAttribute('aria-label', 'Skift mellem AI-overskrift og original');
+  btn.setAttribute('aria-pressed', 'true'); // created only when the AI headline is shown
   Object.assign(btn.style, {
     zIndex: '100',
     background: 'white',
@@ -829,6 +851,7 @@ function createToggleButton() {
 function setButtonState(btn, showingAi) {
   btn.style.opacity = showingAi ? '1' : '0.5';
   btn.style.filter = showingAi ? 'none' : 'grayscale(100%)';
+  btn.setAttribute('aria-pressed', String(showingAi));
 }
 
 function revertAllTeasers() {
@@ -840,7 +863,11 @@ function revertAllTeasers() {
 
     // Applied items carry the title-selector marker — restore their headline/styles.
     if (container.dataset.unbaitTitleSelector) {
-      const titleEl = container.querySelector(container.dataset.unbaitTitleSelector);
+      // ownQuery, not querySelector: on bt.dk an outer teaser's plain query would hit
+      // the NESTED teaser's title first and write the outer's saved markup into it,
+      // leaving the outer headline stuck on the AI text. ownQuery re-derives exactly
+      // the element resolveTeaser paired at apply time.
+      const titleEl = ownQuery(container, container.dataset.unbaitTitleSelector);
       // 'fill' sites restore from originalTitleHTML, not originalTitle, so gate on
       // finding the element (we know it was processed) rather than a non-empty title.
       if (titleEl) {
@@ -877,15 +904,36 @@ function processArticlePage() {
   const heading = document.querySelector(ap.headingSelector);
   const body = document.querySelector(ap.bodySelector);
   if (!heading || !body) return; // not an article page
-  if (heading.dataset.unbaitProcessed) return;
-  heading.dataset.unbaitProcessed = 'true';
 
   const url = window.location.origin + window.location.pathname;
-  const originalTitle = heading.innerText.trim();
-  const text = extractArticleText(ap, body);
+  let staleReuse = false;
+  if (heading.dataset.unbaitProcessed) {
+    // The claim is keyed to the URL: bt.dk's Next.js client routing can REUSE the
+    // same <h1> node for the next article, which would otherwise keep the old claim
+    // (new article never processed) and leave a toggle wired to the old article's
+    // state. Detect the mismatch, drop the stale claim/state and re-process.
+    if (heading.dataset.unbaitUrl === url) return;
+    heading.querySelector('.unbait-toggle')?.remove();
+    articleState = null;
+    articleEpoch++; // drop the old article's in-flight responses
+    staleReuse = true;
+  }
+  heading.dataset.unbaitProcessed = 'true';
+  heading.dataset.unbaitUrl = url;
+
+  // After a reused-node navigation the <h1> may still show OUR previous text (our
+  // innerText write replaced the framework's text node, so its update can be lost) —
+  // prefer the fresh document.title as the original in that case. The same distrust
+  // applies to the BODY: in rewrite mode we replaced its paragraph nodes, so the DOM
+  // may still render the OLD article — sending it would cache A's text under B's URL
+  // for 2 days. So on stale reuse send NO text (the background fetches B's HTML
+  // itself) and skip the body rewrite for this navigation (headline-only).
+  const docTitle = (document.title || '').split(' | ')[0].trim();
+  const originalTitle = (staleReuse && docTitle) ? docTitle : heading.innerText.trim();
+  const text = staleReuse ? '' : extractArticleText(ap, body);
   const epoch = articleEpoch;
 
-  if (settings.rewriteArticles && text.length >= 200) {
+  if (settings.rewriteArticles && !staleReuse && text.length >= 200) {
     chrome.runtime.sendMessage({ action: 'rewriteArticle', url, title: originalTitle, text }, (response) => {
       if (chrome.runtime.lastError || !isArticleResponseCurrent(epoch, heading, url)) return;
       if (response && response.success) {
@@ -1047,10 +1095,14 @@ function revertArticlePage() {
     }
     articleState.heading.querySelector('.unbait-toggle')?.remove();
     delete articleState.heading.dataset.unbaitProcessed;
+    delete articleState.heading.dataset.unbaitUrl;
     articleState = null;
   }
   // Also clear the guard when no response has been applied yet (request still
   // in flight) so the page can be re-processed in the new mode
   const heading = document.querySelector(ap.headingSelector);
-  if (heading) delete heading.dataset.unbaitProcessed;
+  if (heading) {
+    delete heading.dataset.unbaitProcessed;
+    delete heading.dataset.unbaitUrl;
+  }
 }

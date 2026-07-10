@@ -66,8 +66,8 @@ select:focus {
   margin-top: 5px;
 }
 
-/* Buttons */
-button {
+/* Buttons — .button covers button-styled anchors (onboarding's CTA link) */
+button, .button {
   background-color: #3498db;
   color: white;
   border: none;
@@ -79,8 +79,16 @@ button {
   transition: background-color 0.2s;
 }
 
-button:hover {
+button:hover, .button:hover {
   background-color: #2980b9;
+}
+
+/* Anchor reset for button-styled links; :hover included so the generic
+   a:hover underline rule (higher specificity) can't re-add an underline. */
+.button, .button:hover {
+  display: inline-block;
+  color: white;
+  text-decoration: none;
 }
 
 button.secondary {
@@ -157,6 +165,12 @@ button.secondary:hover {
 
 .switch input:checked + .slider {
   background-color: #3498db;
+}
+
+/* The checkbox itself is visually hidden, so give keyboard users a visible
+   focus ring on the slider — without it, tabbing through the popup is blind. */
+.switch input:focus-visible + .slider {
+  box-shadow: 0 0 0 3px rgba(52, 152, 219, 0.35);
 }
 
 .switch input:checked + .slider:before {

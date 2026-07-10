@@ -13,7 +13,7 @@
     /* Usage panel — top priority */
     .usage-panel {
       background: #f5f7fa; border: 1px solid #e3e8ef; border-radius: 8px;
-      padding: 10px 12px; margin-bottom: 12px;
+      padding: 10px 12px; margin-bottom: 12px; cursor: help;
     }
     .usage-line { font-size: 13px; color: #333; }
     .usage-line + .usage-line { margin-top: 4px; }
@@ -21,6 +21,7 @@
     .usage-free .tag { color: #2e7d32; font-weight: 600; }
     .usage-paid { color: #b26a00; }
     .usage-empty { font-size: 12px; color: #888; }
+    .usage-caption { font-size: 11px; color: #888; margin-top: 6px; }
 
     /* Clean-this-page row */
     .clean-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
@@ -60,6 +61,7 @@
         <span class="val" id="paidCost">~$0.00</span> on paid models <span id="paidTokens"></span>
       </div>
       <div class="usage-empty" id="usageEmpty">No AI usage yet.</div>
+      <div class="usage-caption">Since install · free models cost nothing · ~ = estimated</div>
     </div>
 
     <!-- Clean this page (universal / experimental) -->
@@ -85,53 +87,41 @@
 
     <div class="toggle-row">
       <div class="toggle-text">
-        <span class="toggle-title">Enable unb8</span>
+        <span class="toggle-title" id="lblEnable">Enable unb8</span>
         <span class="toggle-desc">Rewrite clickbait headlines on supported sites</span>
       </div>
       <label class="switch">
-        <input type="checkbox" id="extensionEnabled">
+        <input type="checkbox" id="extensionEnabled" aria-labelledby="lblEnable">
         <span class="slider"></span>
       </label>
     </div>
 
     <div class="toggle-row">
       <div class="toggle-text">
-        <span class="toggle-title">Unbait article pages</span>
+        <span class="toggle-title" id="lblRewrite">Unbait article pages</span>
         <span class="toggle-desc">Also rewrite full article text (and inline "Kort nyt" bodies), removing filler — uses more tokens</span>
       </div>
       <label class="switch">
-        <input type="checkbox" id="rewriteArticles">
+        <input type="checkbox" id="rewriteArticles" aria-labelledby="lblRewrite">
         <span class="slider"></span>
       </label>
     </div>
 
     <div class="toggle-row">
       <div class="toggle-text">
-        <span class="toggle-title">Prioritize visible headlines</span>
+        <span class="toggle-title" id="lblLazy">Prioritize visible headlines</span>
         <span class="toggle-desc">Rewrite headlines as you scroll to them, not the whole page at once — saves tokens on articles you never reach. Off = process everything on load (the old method).</span>
       </div>
       <label class="switch">
-        <input type="checkbox" id="lazyLoad">
+        <input type="checkbox" id="lazyLoad" aria-labelledby="lblLazy">
         <span class="slider"></span>
       </label>
     </div>
 
     <div class="form-group">
       <label for="model">AI Model:</label>
-      <select id="model">
-        <option value="auto">Auto — free models with fallback (recommended)</option>
-        <optgroup label="Free models">
-          <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free)</option>
-          <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B A4B (free)</option>
-          <option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra 550B (free)</option>
-          <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (free)</option>
-          <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
-        </optgroup>
-        <optgroup label="Paid models">
-          <option value="google/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (paid — cheaper)</option>
-          <option value="google/gemini-flash-latest">Gemini Flash latest (paid — newest, pricier)</option>
-        </optgroup>
-      </select>
+      <!-- Options are populated by models.js (shared with onboarding.html). -->
+      <select id="model"></select>
       <p class="help-text">Saved instantly. If the chosen model fails (rate limit, downtime), unb8 automatically falls back to the free models.</p>
     </div>
 
@@ -152,6 +142,7 @@
       <a href="onboarding.html" target="_blank">Open Setup Guide</a>
     </div>
   </div>
+  <script src="models.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

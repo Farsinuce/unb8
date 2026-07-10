@@ -7,7 +7,10 @@ The single `unb8/` folder runs in both browsers: Chrome uses
 `background.service_worker`, Firefox 121+ uses `background.scripts`. HTML parsing
 runs in a Chrome offscreen document (`offscreen.js`) or inline on Firefox's event
 page — both call the shared `parser.js`, selected by a `DOMParser` feature-detect
-in `background.js`.
+in `background.js`. Chrome only tolerates the dual background keys from **Chrome
+121** (older Chromium rejects the whole manifest as a parse error), which is why
+the manifest declares `minimum_chrome_version: "121"`; Firefox ignores that
+Chrome-only key.
 
 ## Run it for development (no packaging)
 

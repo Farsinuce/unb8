@@ -27,16 +27,8 @@
       
       <div class="form-group">
         <label for="model">Select AI Model:</label>
-        <select id="model">
-          <option value="auto">Auto — free models with fallback (Recommended)</option>
-          <option value="google/gemma-4-31b-it:free">Gemma 4 31B (free)</option>
-          <option value="google/gemma-4-26b-a4b-it:free">Gemma 4 26B A4B (free)</option>
-          <option value="nvidia/nemotron-3-ultra-550b-a55b:free">Nemotron 3 Ultra 550B (free)</option>
-          <option value="openai/gpt-oss-120b:free">GPT-OSS 120B (free)</option>
-          <option value="openai/gpt-oss-20b:free">GPT-OSS 20B (free)</option>
-          <option value="google/gemini-3.1-flash-lite">Gemini 3.1 Flash Lite (paid — cheaper)</option>
-          <option value="google/gemini-flash-latest">Gemini Flash latest (paid — newest, pricier)</option>
-        </select>
+        <!-- Options are populated by models.js (shared with popup.html). -->
+        <select id="model"></select>
         <p class="help-text">"Auto" uses free models and costs nothing — if one is rate-limited, the next one is tried automatically.</p>
       </div>
 
@@ -50,6 +42,7 @@
       <p>Look for the 🎣 icon to toggle between the original and the AI-generated headline.</p>
     </div>
   </div>
+  <script src="models.js"></script>
   <script src="onboarding.js"></script>
 </body>
 </html>

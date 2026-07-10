@@ -14,6 +14,13 @@ function parseHtml(htmlString) {
     foundSelector: null
   };
 
+  // Capture the __NEXT_DATA__ payload BEFORE the boilerplate strip below removes all
+  // <script> elements — querying it afterwards always returns null, which silently
+  // killed the dr.dk live-blog fallback. (Keeping the element in the doc instead is
+  // not an option: its multi-hundred-KB JSON would pollute the body-text fallback.)
+  const nextDataEl = doc.querySelector('script#__NEXT_DATA__');
+  const nextDataJson = nextDataEl ? nextDataEl.textContent : null;
+
   // Remove unwanted elements
   const unwantedTags = ['script', 'style', 'noscript', 'iframe', 'svg', 'header', 'footer', 'nav', 'aside', 'link', 'meta'];
   unwantedTags.forEach(tag => {
@@ -58,10 +65,9 @@ function parseHtml(htmlString) {
 
   // If text is too short, try to parse __NEXT_DATA__ (common on DR.dk for live blogs)
   if (text.length < 500) {
-    const nextDataScript = doc.querySelector('script#__NEXT_DATA__');
-    if (nextDataScript) {
+    if (nextDataJson) {
       try {
-        const json = JSON.parse(nextDataScript.textContent);
+        const json = JSON.parse(nextDataJson);
         let nextText = '';
 
         // Helper to extract text from DR's JSON structure

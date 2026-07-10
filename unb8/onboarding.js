@@ -11,7 +11,11 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (result.selectedModel) {
       modelSelect.value = result.selectedModel;
-      if (!modelSelect.value) modelSelect.value = 'auto'; // stored model no longer in the list
+      if (!modelSelect.value) {
+        // Stored model no longer in the list: persist the fallback, don't just show it.
+        modelSelect.value = 'auto';
+        chrome.storage.local.set({ selectedModel: 'auto' });
+      }
     }
   });
 

@@ -1,7 +1,8 @@
 {
   "manifest_version": 3,
   "name": "unb8",
-  "version": "1.2.7",
+  "version": "1.2.8",
+  "minimum_chrome_version": "121",
   "description": "Replaces clickbait headlines with factual ones using AI.",
   "permissions": [
     "storage",

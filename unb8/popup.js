@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const CONSENT_KEY = 'universalConsent';
 
   // --- Usage counter -------------------------------------------------------
-  // Kept in sync with the identical helper in background.js (no build step to share it).
+  // Compact token formatter (only used here, in the popup).
   // 1234 -> "1.2k", 999_500 -> "1M" (round the mantissa, then promote if it hits 1000).
   function formatTokens(n) {
     n = Math.max(0, Math.round(n || 0));
@@ -74,10 +74,23 @@ document.addEventListener('DOMContentLoaded', () => {
   chrome.storage.local.get(['openRouterApiKey', 'selectedModel', 'extensionEnabled', 'rewriteArticles', 'lazyLoad'], (result) => {
     if (result.openRouterApiKey) apiKeyInput.value = result.openRouterApiKey;
     modelSelect.value = result.selectedModel || 'auto';
-    if (!modelSelect.value) modelSelect.value = 'auto'; // stored model no longer in the list
+    if (!modelSelect.value) {
+      // Stored model no longer in the list: don't just DISPLAY auto — persist it,
+      // otherwise the background keeps burning a doomed attempt on the dead model
+      // at the head of every request's chain while the UI claims "Auto".
+      modelSelect.value = 'auto';
+      chrome.storage.local.set({ selectedModel: 'auto' });
+      showStatus('Your previously selected model is no longer available — switched to Auto.', 'success');
+    }
     enabledToggle.checked = result.extensionEnabled !== false; // default: on
     rewriteToggle.checked = result.rewriteArticles === true;   // default: off
     lazyToggle.checked = result.lazyLoad !== false;            // default: on
+
+    // The one mandatory setup step: without a key every request fails silently on
+    // the news sites, so make the popup say so the moment it opens.
+    if (!result.openRouterApiKey) {
+      showStatus('No API key yet — unb8 is inactive. Paste your OpenRouter key below (or open the Setup Guide).', 'error');
+    }
   });
 
   // --- Everything saves instantly (no "Save" button) -----------------------
@@ -119,63 +132,30 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // --- Test Connection -----------------------------------------------------
-  testButton.addEventListener('click', async () => {
-    const apiKey = apiKeyInput.value.trim();
-    const model = modelSelect.value === 'auto' ? 'google/gemma-4-31b-it:free' : modelSelect.value;
-
-    if (!apiKey) {
+  // Runs in the background worker through the SAME chain as real requests (selected
+  // model first, then the live free chain, incl. the reasoning-off retry), so the
+  // verdict matches what headline generation will actually do — no hardcoded test
+  // model that fails on a rate limit while the extension itself works fine. The key
+  // is saved per keystroke, so the background reads exactly what's in the field.
+  testButton.addEventListener('click', () => {
+    if (!apiKeyInput.value.trim()) {
       showStatus('Please enter an API Key first.', 'error');
       return;
     }
-
     showStatus('Testing connection...', 'loading');
     testButton.disabled = true;
-
-    try {
-      const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/Farsinuce/unb8',
-          'X-Title': 'unb8 Popup'
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: 'user', content: 'Hi' }
-          ],
-          max_tokens: 100,
-          usage: { include: true }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      if (data.error) {
-        throw new Error(data.error.message || 'API returned an error');
-      }
-
-      // Count this call's tokens too, via the background accumulator.
-      if (data.usage) {
-        chrome.runtime.sendMessage({ action: 'recordUsage', usage: data.usage, isFree: model.endsWith(':free'), model: model });
-      }
-
-      if (data.choices && data.choices.length > 0) {
-        showStatus(`Connection successful! (${model})`, 'success');
-      } else {
-        throw new Error('No response from AI.');
-      }
-
-    } catch (error) {
-      console.error(error);
-      showStatus(`Failed: ${error.message}`, 'error');
-    } finally {
+    chrome.runtime.sendMessage({ action: 'testConnection' }, (response) => {
       testButton.disabled = false;
-    }
+      if (chrome.runtime.lastError || !response) {
+        showStatus('Failed: could not reach the background worker. Try reloading the extension.', 'error');
+      } else if (response.success) {
+        showStatus(`Connection works! Replied via ${response.model}.`, 'success');
+      } else if (response.keyValid) {
+        showStatus(`API key is valid, but no model answered right now (${response.error}). unb8 retries automatically while you browse.`, 'error');
+      } else {
+        showStatus(`Failed: ${response.error}`, 'error');
+      }
+    });
   });
 
   // --- Clean this page (experimental universal mode) -----------------------
@@ -206,6 +186,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // chrome:/about:/file: pages. The injected script keeps running (and shows its own
   // on-page control) after this popup closes, which it will as soon as focus leaves it.
   function runCleanPage() {
+    // Without a key every universal request fails invisibly and the on-page widget
+    // would sit at "0 cleaned" forever — refuse up front instead. Checked here (not
+    // in the click handler) so the consent-accept path is covered too.
+    if (!apiKeyInput.value.trim()) {
+      showStatus('Add your OpenRouter API key below first.', 'error');
+      return;
+    }
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const tab = tabs && tabs[0];
       if (!tab || !tab.id || !/^https?:/.test(tab.url || '')) {
